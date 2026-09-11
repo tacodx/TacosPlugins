@@ -1707,7 +1707,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Install locally and observe a real session**
 
 ```bash
-claude plugin marketplace add /home/danja/Projects/TacosPlugins
+claude plugin marketplace add /path/to/TacosPlugins
 claude plugin install usage-guard@tacos-plugins
 ```
 
