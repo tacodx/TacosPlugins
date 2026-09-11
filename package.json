@@ -1,0 +1,7 @@
+{
+  "name": "tacosplugins",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test packages/core/test/*.mjs" }
+}
