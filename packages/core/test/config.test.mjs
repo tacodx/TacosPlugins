@@ -49,7 +49,10 @@ test('a missing file is not an error', () => {
   assert.equal(r.mode, DEFAULTS.mode)
 })
 
-test('invalid dir (e.g. undefined) never throws and returns defaults', () => {
+test('invalid dir (e.g. undefined) never throws, and is treated as unreadable rather than silently enforcing', () => {
+  // path.join(undefined, ...) throws before readFile is even called, with a
+  // non-ENOENT error — the same "we could not read this" case as corrupt JSON,
+  // so it degrades to dry-run instead of quietly defaulting to enforce.
   const fn = () => readConfig({
     dir: undefined, sessionId: 's1',
     readFile: () => '{}',
@@ -57,5 +60,33 @@ test('invalid dir (e.g. undefined) never throws and returns defaults', () => {
   assert.doesNotThrow(fn)
   const r = fn()
   assert.deepEqual(r.gauges, DEFAULTS.gauges)
+  assert.equal(r.mode, 'dry-run')
+  assert.equal(r.configUnreadable, true)
+})
+
+test('a corrupt config (not ENOENT) is unreadable: it degrades to dry-run and says so, instead of silently re-arming enforce', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: () => '{ not json',
+  })
+  assert.equal(r.mode, 'dry-run')
+  assert.equal(r.configUnreadable, true)
+})
+
+test('ENOENT means no config yet, not unreadable: the shipped default (enforce) applies normally', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: () => { throw Object.assign(new Error('nope'), { code: 'ENOENT' }) },
+  })
   assert.equal(r.mode, DEFAULTS.mode)
+  assert.equal(r.configUnreadable, undefined)
+})
+
+test('a valid config that deliberately turns the guard off is respected and is not marked unreadable', () => {
+  const r = readConfig({
+    dir: '/nope',
+    readFile: () => JSON.stringify({ mode: 'off' }),
+  })
+  assert.equal(r.mode, 'off')
+  assert.equal(r.configUnreadable, undefined)
 })

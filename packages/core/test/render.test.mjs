@@ -51,6 +51,16 @@ test('a HARD decision rounds the percent instead of printing the raw float', () 
   assert.doesNotMatch(out, /91\.6/)
 })
 
+test('an unreadable config surfaces a line instead of degrading silently', () => {
+  const gauges = { five_hour: { percent: 10, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges, thresholds: DEFAULTS.gauges, decision: { state: STATE.OK },
+    mode: 'dry-run', blind: false, configUnreadable: true,
+  })
+  assert.match(out, /config could not be read/i)
+  assert.match(out, /observing/i)
+})
+
 test('a watch-only gauge still renders, marked as such', () => {
   const gauges = { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
   const out = renderStatus({

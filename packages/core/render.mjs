@@ -11,8 +11,9 @@ export function bar(percent, width = 14) {
   return '='.repeat(filled) + '.'.repeat(width - filled)
 }
 
-export function renderStatus({ gauges, thresholds, decision, mode, blind, reason }) {
+export function renderStatus({ gauges, thresholds, decision, mode, blind, reason, configUnreadable }) {
   const lines = [`usage-guard  [mode: ${mode}]`, '']
+  if (configUnreadable) lines.push('  config could not be read; the guard is observing only, not enforcing.', '')
   if (blind || !gauges) {
     lines.push(`  no usage data available (${reason || 'unknown'})`)
     lines.push('  the guard is blind and is allowing everything.')
