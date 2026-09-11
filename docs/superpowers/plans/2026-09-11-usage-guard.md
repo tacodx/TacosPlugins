@@ -24,6 +24,11 @@ Every task's requirements implicitly include this section.
 - **Never write `"matcher": "*"`.** A matcher containing characters outside `[A-Za-z0-9_|,-]` compiles as a JS RegExp, and a lone `*` is invalid ("nothing to repeat"). Invalid matchers return false silently. Omit the key to match all tools.
 - **Commits carry no `Co-Authored-By` trailer and no "Generated with" line.** This is the repo owner's standing rule.
 - **Every fail-open `catch` carries a one-line comment** saying it is deliberate and why. The empty catches in `cache.mjs`, `auth.mjs`, `config.mjs` and `session.mjs`, and the `uncaughtException`/`unhandledRejection` handlers in `hookio.mjs`, are required by the fail-open rule above — not oversights.
+- **Never assert inside an injected mock that is passed to a fail-open function.** These modules
+  swallow exceptions by design, so an `assert` that throws inside a mock is caught by the code
+  under test and the test passes no matter what. Record what the mock received into a variable,
+  let the call return, then assert afterwards. A test whose assertions live inside the mock is
+  vacuous — it reads as coverage while verifying nothing.
 - **No network calls in tests.** Every module that touches the network takes an injected `fetchImpl`.
 - **Injected clock.** Anything time-dependent takes a `now` parameter (milliseconds) so tests are deterministic.
 
