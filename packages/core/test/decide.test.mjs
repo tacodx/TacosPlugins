@@ -60,3 +60,22 @@ test('NaN soft threshold leaves gauge ungoverned', () => {
   assert.equal(r.state, STATE.OK)
   assert.equal(r.gauge, null)
 })
+
+test('a gauge marked enforce:false never decides, however high', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: false } })
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})
+
+test('omitting enforce leaves the gauge enforcing', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90 } })
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('enforce:true is equivalent to omitting it', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: true } })
+  assert.equal(r.state, STATE.HARD)
+})

@@ -50,3 +50,15 @@ test('a HARD decision rounds the percent instead of printing the raw float', () 
   assert.match(out, /92%/)
   assert.doesNotMatch(out, /91\.6/)
 })
+
+test('a watch-only gauge still renders, marked as such', () => {
+  const gauges = { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges,
+    thresholds: { five_hour: { soft: 75, hard: 90, enforce: false } },
+    decision: { state: STATE.OK }, mode: 'enforce', blind: false,
+  })
+  assert.match(out, /five_hour/)
+  assert.match(out, /100/)
+  assert.match(out, /watch-only/i)
+})

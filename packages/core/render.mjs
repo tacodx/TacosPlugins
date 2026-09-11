@@ -24,8 +24,9 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
     if (!g) { lines.push(`  ${name.padEnd(12)} not reported by this account`); continue }
     const money = g.usedMinor != null
       ? `  (${formatMoney(g.usedMinor, g.limitMinor, g.currency, g.decimals)})` : ''
+    const watch = limit.enforce === false ? '  (watch-only)' : ''
     lines.push(`  ${name.padEnd(12)} [${bar(g.percent)}] ${String(Math.round(g.percent)).padStart(3)}%` +
-      `  soft ${limit.soft} / hard ${limit.hard}${money}`)
+      `  soft ${limit.soft} / hard ${limit.hard}${money}${watch}`)
     if (g.resetsAt) lines.push(`  ${''.padEnd(12)} resets ${g.resetsAt}`)
   }
   for (const s of gauges.scoped || []) {

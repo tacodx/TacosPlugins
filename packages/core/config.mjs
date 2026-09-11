@@ -3,6 +3,9 @@ import { join } from 'node:path'
 
 const MODES = new Set(['enforce', 'dry-run', 'off'])
 
+// Any gauge may carry `enforce: false` to become watch-only: it is still fetched and
+// still rendered with its percentage, but it can never produce a denial. Omitted or
+// `true` means the gauge enforces normally.
 export const DEFAULTS = Object.freeze({
   gauges: {
     five_hour:   { soft: 75, hard: 90 },

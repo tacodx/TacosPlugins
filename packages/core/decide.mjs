@@ -17,6 +17,7 @@ export function decide(gauges, thresholds) {
     const gauge = gauges[name]
     if (!gauge || typeof gauge.percent !== 'number' || Number.isNaN(gauge.percent)) continue
     if (!limit) continue
+    if (limit.enforce === false) continue // watch-only: still rendered, but never decides
     if (typeof limit.soft !== 'number' || Number.isNaN(limit.soft)) continue
     if (typeof limit.hard !== 'number' || Number.isNaN(limit.hard)) continue
 
