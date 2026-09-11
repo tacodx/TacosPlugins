@@ -79,3 +79,18 @@ test('enforce:true is equivalent to omitting it', () => {
     { five_hour: { soft: 75, hard: 90, enforce: true } })
   assert.equal(r.state, STATE.HARD)
 })
+
+test('a watch-only gauge does not mask an enforcing gauge listed after it', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: { percent: 95, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: false }, seven_day: { soft: 60, hard: 80 } },
+  )
+  assert.equal(r.state, STATE.HARD)
+  assert.equal(r.gauge, 'seven_day')
+})
+
+test('enforce:0 is falsy but not the literal false, so the gauge still enforces', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: 0 } })
+  assert.equal(r.state, STATE.HARD)
+})

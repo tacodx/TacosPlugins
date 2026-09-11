@@ -6,7 +6,7 @@ import { DEFAULTS } from '../config.mjs'
 const cfg = { gauges: DEFAULTS.gauges, mode: 'enforce' }
 const at = (p) => ({ five_hour: { percent: p, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] })
 
-test('the shipped default is enforce', () => {
+test('the default is enforce', () => {
   assert.equal(DEFAULTS.mode, 'enforce')
 })
 
