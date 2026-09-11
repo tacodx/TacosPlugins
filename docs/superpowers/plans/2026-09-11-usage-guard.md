@@ -2004,6 +2004,92 @@ Ceiling denies every tool; the soft band denies only new fan-out so work
 already underway can finish. A blind guard still never denies."
 ```
 
+- [ ] **Step 7: Write the failing watch-only test**
+
+A gauge may opt out of enforcement while staying visible. Add to `packages/core/test/decide.test.mjs`:
+
+```js
+test('a gauge marked enforce:false never decides, however high', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: false } })
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})
+
+test('omitting enforce leaves the gauge enforcing', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90 } })
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('enforce:true is equivalent to omitting it', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: true } })
+  assert.equal(r.state, STATE.HARD)
+})
+```
+
+And to `packages/core/test/render.test.mjs`:
+
+```js
+test('a watch-only gauge still renders, marked as such', () => {
+  const gauges = { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges,
+    thresholds: { five_hour: { soft: 75, hard: 90, enforce: false } },
+    decision: { state: STATE.OK }, mode: 'enforce', blind: false,
+  })
+  assert.match(out, /five_hour/)
+  assert.match(out, /100/)
+  assert.match(out, /watch-only/i)
+})
+```
+
+- [ ] **Step 8: Run them to verify they fail**
+
+Run: `node --test packages/core/test/decide.test.mjs packages/core/test/render.test.mjs`
+Expected: the `enforce:false` test FAILS (it currently decides HARD), and the render test FAILS on `/watch-only/i`.
+
+- [ ] **Step 9: Implement the flag**
+
+In `packages/core/decide.mjs`, add one guard inside the loop, immediately after the `if (!limit) continue` line:
+
+```js
+    if (limit.enforce === false) continue // watch-only: still rendered, but never decides
+```
+
+In `packages/core/render.mjs`, inside the gauge loop, mark it. Where the gauge line is pushed, append a suffix:
+
+```js
+    const watch = limit.enforce === false ? '  (watch-only)' : ''
+```
+
+and add `${watch}` to the end of that pushed line, after the money segment.
+
+In `packages/core/config.mjs`, document the key above `DEFAULTS`:
+
+```js
+// Any gauge may carry `enforce: false` to become watch-only: it is still fetched and
+// still rendered with its percentage, but it can never produce a denial. Omitted or
+// `true` means the gauge enforces normally.
+```
+
+- [ ] **Step 10: Run to verify they pass**
+
+Run: `node scripts/release.mjs && npm test`
+Expected: all tests pass.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add packages/core/decide.mjs packages/core/render.mjs packages/core/config.mjs packages/core/test/decide.test.mjs packages/core/test/render.test.mjs
+git commit -m "feat(core): per-gauge watch-only flag
+
+A gauge with enforce:false is still fetched and still rendered with its
+percentage, but never produces a denial. Every gauge enforces by default;
+the flag is for people who want a gauge visible without acting on it."
+```
+
 ---
 
 ### Task 12: README and release checks
