@@ -485,9 +485,19 @@ export function readConfig({ dir, sessionId, readFile }) {
   const session = sessionId ? load(dir, 'tacos', 'sessions', `${sessionId}.json`) : {}
   const merged = mergeConfig(user, session)
 
-  // fail-open, and this is what makes that phrase literally true: a config we could not
-  // read can never produce a denial. It still observes and still reports.
-  return unreadable ? { ...merged, mode: 'dry-run', configUnreadable: true } : merged
+  if (!unreadable) return merged
+
+  // Something was unreadable. Two things must both hold:
+  //  - we must never NEWLY enforce on data we could not parse, and
+  //  - we must never DISCARD a mode a readable layer stated explicitly.
+  // A corrupt session file must not override the user's own valid config, in either
+  // direction. Only when no readable layer named a mode do we fall to dry-run.
+  const explicitlySet = MODES.has(session?.mode) || MODES.has(user?.mode)
+  return {
+    ...merged,
+    mode: explicitlySet ? merged.mode : 'dry-run',
+    configUnreadable: true,
+  }
 }
 ```
 
@@ -1780,7 +1790,8 @@ Expected: FAIL — cannot find module `../session.mjs`.
 - [ ] **Step 3: Write `session.mjs`**
 
 ```js
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 const ALIASES = {
@@ -1809,6 +1820,7 @@ export function parseBudgetArgs(argv) {
 
 export function writeSessionConfig(dir, sessionId, patch, {
   writeFile = writeFileSync, mkdir = mkdirSync, readFile = readFileSync,
+  rename = renameSync, remove = unlinkSync, uuid = randomUUID,
 } = {}) {
   const path = sessionPath(dir, sessionId)
 
@@ -1824,8 +1836,18 @@ export function writeSessionConfig(dir, sessionId, patch, {
   const gauges = { ...(existing.gauges || {}), ...(patch.gauges || {}) }
   if (Object.keys(gauges).length > 0) merged.gauges = gauges
 
+  // Atomic write. A plain writeFile can leave a truncated session file if interrupted,
+  // and this file is rewritten on every /budget call — that truncation is exactly what
+  // readConfig then has to reason about.
   mkdir(join(dir, 'tacos', 'sessions'), { recursive: true })
-  writeFile(path, JSON.stringify(merged, null, 2), { mode: 0o600 })
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
+  try {
+    writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600, flag: 'wx' })
+    rename(tmp, path)
+  } catch (err) {
+    try { remove(tmp) } catch { /* tmp may never have been created */ }
+    throw err // /budget must not report success for a write that did not land
+  }
 }
 
 export function gcSessions(dir, {
