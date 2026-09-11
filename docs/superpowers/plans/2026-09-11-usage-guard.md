@@ -1667,8 +1667,6 @@ Note the explicit `timeout` on every entry, the omitted `matcher` on the all-too
       { "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "Agent|Workflow",
-        "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] },
       { "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] }
     ]
   }
