@@ -54,7 +54,7 @@ export async function fetchUsage({ token, fetchImpl = fetch, timeoutMs = 3000 })
     })
     if (!res?.ok) return { raw: null, error: `http-${res?.status ?? 'unknown'}` }
     return { raw: await res.json(), error: null }
-  } catch (err) {
+  } catch (err) { // fail-open: a timed-out or unreachable usage endpoint is a stale-cache path, not a broken hook
     return { raw: null, error: err?.name === 'AbortError' ? 'timeout' : 'network' }
   } finally { clearTimeout(timer) }
 }
