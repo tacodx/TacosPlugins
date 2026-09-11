@@ -53,3 +53,74 @@ test('a stale lock is broken and retaken', async () => {
   await withLock('/l', async () => {}, { now: 100000, staleMs: 5000, fs })
   assert.equal(removed, true)
 })
+
+test('writeCache succeeds: entry written contains fetchedAt and data', () => {
+  let writtenContent
+  assert.doesNotThrow(() => writeCache('/c', { result: 42 }, {
+    now: 5000,
+    mkdir: () => {},
+    writeFile: (path, content) => {
+      writtenContent = JSON.parse(content)
+    },
+    rename: (tmp, final) => {
+      assert.equal(writtenContent.fetchedAt, 5000)
+      assert.deepEqual(writtenContent.data, { result: 42 })
+      assert.equal(tmp, `/c.${process.pid}.tmp`)
+      assert.equal(final, '/c')
+    },
+  }))
+})
+
+test('writeCache failed rename cleans up tmp file', () => {
+  let removed = false
+  assert.doesNotThrow(() => writeCache('/c', { a: 1 }, {
+    now: 1,
+    mkdir: () => {},
+    writeFile: () => {},
+    rename: () => { throw new Error('readonly') },
+    remove: (path) => {
+      assert.equal(path, `/c.${process.pid}.tmp`)
+      removed = true
+    },
+  }))
+  assert.equal(removed, true, 'tmp file must be cleaned up on rename failure')
+})
+
+test('uncontended lock acquire calls removeLock after fn resolves', async () => {
+  let removed = false
+  const fs = {
+    writeLock: () => {},
+    removeLock: () => { removed = true },
+  }
+  let fnRan = false
+  await withLock('/l', async () => { fnRan = true }, { now: 1000, staleMs: 5000, fs })
+  assert.equal(fnRan, true)
+  assert.equal(removed, true)
+})
+
+test('lock cleanup happens even if fn throws', async () => {
+  let removed = false
+  const fs = {
+    writeLock: () => {},
+    removeLock: () => { removed = true },
+  }
+  const fnError = new Error('fn failed')
+  let caught
+  try {
+    await withLock('/l', async () => { throw fnError }, { now: 1000, staleMs: 5000, fs })
+  } catch (e) {
+    caught = e
+  }
+  assert.equal(caught, fnError, 'error must propagate out of withLock')
+  assert.equal(removed, true, 'removeLock must be called even when fn throws')
+})
+
+test('readCache rejects valid json that is an array', () => {
+  const r = readCache('/c', { now: 1000, ttlMs: 60000, maxStaleMs: 900000, readFile: () => JSON.stringify([1, 2, 3]) })
+  assert.equal(r, null)
+})
+
+test('readCache rejects valid json object missing required fields', () => {
+  const r = readCache('/c', { now: 1000, ttlMs: 60000, maxStaleMs: 900000, readFile: () => JSON.stringify({ foo: 1 }) })
+  assert.equal(r, null)
+})

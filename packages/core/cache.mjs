@@ -14,13 +14,18 @@ export function readCache(path, { now, ttlMs, maxStaleMs, readFile = readFileSyn
 /** Never throws — a cache we cannot persist is a slow cache, not a broken session. */
 export function writeCache(path, data, {
   now, writeFile = writeFileSync, mkdir = mkdirSync,
+  rename = renameSync, remove = unlinkSync,
 } = {}) {
+  const tmp = `${path}.${process.pid}.tmp`
   try {
     mkdir(dirname(path), { recursive: true })
-    const tmp = `${path}.${process.pid}.tmp`
     writeFile(tmp, JSON.stringify({ fetchedAt: now, data }), { mode: 0o600 })
-    renameSync(tmp, path)
-  } catch { /* ignore write failures */ }
+    rename(tmp, path)
+  } catch { // fail-open: a cache we cannot persist is a slow cache, not a broken session
+    // a failed rename leaves the tmp file behind; each hook run is a new pid, so
+    // without this they would accumulate indefinitely
+    try { remove(tmp) } catch { /* tmp may never have been created; nothing to clean up */ }
+  }
 }
 
 const defaultFs = {
@@ -38,7 +43,7 @@ export async function withLock(lockPath, fn, { now, staleMs, fs = defaultFs } = 
   try {
     fs.writeLock(lockPath, JSON.stringify({ at: now, pid: process.pid }))
     held = true
-  } catch (err) {
+  } catch (err) { // any writeLock failure (incl. non-EEXIST) falls through and runs fn unlocked
     if (err?.code === 'EEXIST') {
       let at = 0
       try { at = JSON.parse(fs.readLock(lockPath))?.at ?? 0 } catch { at = 0 } // lock file corrupt or unreadable
