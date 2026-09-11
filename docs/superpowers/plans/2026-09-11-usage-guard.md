@@ -146,7 +146,7 @@ Expected: FAIL — `ENOENT` opening `.claude-plugin/marketplace.json`.
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test packages/core/test/" }
+  "scripts": { "test": "node --test" }
 }
 ```
 
