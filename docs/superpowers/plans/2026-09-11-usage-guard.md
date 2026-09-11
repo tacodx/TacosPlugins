@@ -1286,8 +1286,8 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
   lines.push('')
   const state = decision?.state ?? STATE.OK
   if (state === STATE.OK) lines.push('  decision: allow — below every soft threshold.')
-  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${decision.percent}% (soft ${decision.soft}). New fan-out would be declined.`)
-  else lines.push(`  decision: deny — ${decision.gauge} at ${decision.percent}% (ceiling ${decision.hard}).`)
+  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${Math.round(decision.percent)}% (soft ${decision.soft}). New fan-out would be declined.`)
+  else lines.push(`  decision: deny — ${decision.gauge} at ${Math.round(decision.percent)}% (ceiling ${decision.hard}).`)
   return lines.join('\n')
 }
 ```
@@ -1296,7 +1296,7 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
 
 ```js
 #!/usr/bin/env node
-import { readdirSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
+import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -1309,6 +1309,15 @@ export function vendorCore(coreDir, targetLibDir) {
     if (statSync(join(coreDir, name)).isDirectory()) continue
     copyFileSync(join(coreDir, name), join(targetLibDir, name))
     copied.push(name)
+  }
+  // Prune modules core no longer has. Without this, a renamed or deleted module lingers
+  // in every plugin's lib/ forever and stays importable — a zombie silently diverging
+  // from the source of truth.
+  const wanted = new Set(copied)
+  for (const name of readdirSync(targetLibDir)) {
+    if (name.endsWith('.mjs') && !wanted.has(name)) {
+      rmSync(join(targetLibDir, name), { force: true })
+    }
   }
   return copied
 }
