@@ -33,13 +33,19 @@ export function writeSessionConfig(dir, sessionId, patch, {
   // MERGE, never replace. Each /budget call carries only the one setting the user just
   // named, so overwriting would make `/budget weekly 70` silently discard the ceiling
   // they set with `/budget 80` a moment earlier.
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
   let existing = {}
   try { existing = JSON.parse(readFile(path, 'utf8')) }
   catch { existing = {} } // no prior file, or an unreadable one: start fresh rather than throw
-  if (existing === null || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
+  if (!isObj(existing)) existing = {}
 
   const merged = { ...existing, ...patch }
-  const gauges = { ...(existing.gauges || {}), ...(patch.gauges || {}) }
+  // A non-object `gauges` (e.g. hand-edited to a string) must be treated as absent, not
+  // spread — spreading a string yields numeric-index keys that corrupt the gauges map.
+  const existingGauges = isObj(existing.gauges) ? existing.gauges : {}
+  const patchGauges = isObj(patch.gauges) ? patch.gauges : {}
+  const gauges = { ...existingGauges, ...patchGauges }
   if (Object.keys(gauges).length > 0) merged.gauges = gauges
 
   mkdir(join(dir, 'tacos', 'sessions'), { recursive: true })
