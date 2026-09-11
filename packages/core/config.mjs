@@ -55,7 +55,17 @@ export function readConfig({ dir, sessionId, readFile }) {
   const session = sessionId ? load(dir, 'tacos', 'sessions', `${sessionId}.json`) : {}
   const merged = mergeConfig(user, session)
 
-  // fail-open, and this is what makes that phrase literally true: a config we could not
-  // read can never produce a denial. It still observes and still reports.
-  return unreadable ? { ...merged, mode: 'dry-run', configUnreadable: true } : merged
+  if (!unreadable) return merged
+
+  // Something was unreadable. Two things must both hold:
+  //  - we must never NEWLY enforce on data we could not parse, and
+  //  - we must never DISCARD a mode a readable layer stated explicitly.
+  // A corrupt session file must not override the user's own valid config, in either
+  // direction. Only when no readable layer named a mode do we fall to dry-run.
+  const explicitlySet = MODES.has(session?.mode) || MODES.has(user?.mode)
+  return {
+    ...merged,
+    mode: explicitlySet ? merged.mode : 'dry-run',
+    configUnreadable: true,
+  }
 }

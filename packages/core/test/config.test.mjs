@@ -90,3 +90,48 @@ test('a valid config that deliberately turns the guard off is respected and is n
   assert.equal(r.mode, 'off')
   assert.equal(r.configUnreadable, undefined)
 })
+
+test('a corrupt session file does not discard the user config\'s valid, explicit "off"', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: (path) => path.endsWith('config.json')
+      ? JSON.stringify({ mode: 'off' })
+      : (() => { throw new Error('session file truncated') })(),
+  })
+  assert.equal(r.mode, 'off')
+  assert.equal(r.configUnreadable, true)
+})
+
+test('a corrupt session file does not discard the user config\'s valid, explicit "enforce"', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: (path) => path.endsWith('config.json')
+      ? JSON.stringify({ mode: 'enforce' })
+      : (() => { throw new Error('session file truncated') })(),
+  })
+  assert.equal(r.mode, 'enforce')
+  assert.equal(r.configUnreadable, true)
+})
+
+test('a corrupt user config does not discard a valid session override (e.g. from /budget on)', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: (path) => path.includes('sessions')
+      ? JSON.stringify({ mode: 'enforce' })
+      : (() => { throw new Error('user config truncated') })(),
+  })
+  assert.equal(r.mode, 'enforce')
+  assert.equal(r.configUnreadable, true)
+})
+
+test('a corrupt user config with no session file at all (ENOENT) degrades to dry-run', () => {
+  const r = readConfig({
+    dir: '/nope', sessionId: 's1',
+    readFile: (path) => {
+      if (path.includes('sessions')) throw Object.assign(new Error('nope'), { code: 'ENOENT' })
+      throw new Error('user config truncated')
+    },
+  })
+  assert.equal(r.mode, 'dry-run')
+  assert.equal(r.configUnreadable, true)
+})
