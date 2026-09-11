@@ -10,7 +10,7 @@ export const DEFAULTS = Object.freeze({
     extra_usage: { soft: 70, hard: 85 },
     scoped:      { enabled: false },
   },
-  mode: 'enforce',
+  mode: 'dry-run',
 })
 
 export function configDir(env = process.env) {
