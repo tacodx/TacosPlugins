@@ -1,5 +1,6 @@
-import { writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync } from 'node:fs'
+import { writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 const ALIASES = {
   '5h': 'five_hour', session: 'five_hour', five_hour: 'five_hour',
@@ -27,6 +28,7 @@ export function parseBudgetArgs(argv) {
 
 export function writeSessionConfig(dir, sessionId, patch, {
   writeFile = writeFileSync, mkdir = mkdirSync, readFile = readFileSync,
+  rename = renameSync, remove = unlinkSync, uuid = randomUUID,
 } = {}) {
   const path = sessionPath(dir, sessionId)
 
@@ -49,7 +51,14 @@ export function writeSessionConfig(dir, sessionId, patch, {
   if (Object.keys(gauges).length > 0) merged.gauges = gauges
 
   mkdir(join(dir, 'tacos', 'sessions'), { recursive: true })
-  writeFile(path, JSON.stringify(merged, null, 2), { mode: 0o600 })
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
+  try {
+    writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600, flag: 'wx' })
+    rename(tmp, path)
+  } catch (err) {
+    try { remove(tmp) } catch { /* tmp may never have been created */ }
+    throw err // /budget must not report success for a write that did not land
+  }
 }
 
 export function gcSessions(dir, {

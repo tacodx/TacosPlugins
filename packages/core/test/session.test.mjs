@@ -103,8 +103,8 @@ test('writeSessionConfig merges successive gauge settings instead of overwriting
   const writeFile = (_path, data) => { stored = data }
   const mkdir = () => {}
 
-  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 65, hard: 80 } } }, { readFile, writeFile, mkdir })
-  writeSessionConfig('/d', 's1', { gauges: { seven_day: { soft: 55, hard: 70 } } }, { readFile, writeFile, mkdir })
+  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 65, hard: 80 } } }, { readFile, writeFile, mkdir, rename: () => {} })
+  writeSessionConfig('/d', 's1', { gauges: { seven_day: { soft: 55, hard: 70 } } }, { readFile, writeFile, mkdir, rename: () => {} })
 
   const doc = JSON.parse(stored)
   assert.deepEqual(doc.gauges.five_hour, { soft: 65, hard: 80 })
@@ -117,7 +117,7 @@ test('turning the guard off preserves existing gauge ceilings', () => {
   const writeFile = (_path, data) => { stored = data }
   const mkdir = () => {}
 
-  writeSessionConfig('/d', 's1', { mode: 'off' }, { readFile, writeFile, mkdir })
+  writeSessionConfig('/d', 's1', { mode: 'off' }, { readFile, writeFile, mkdir, rename: () => {} })
 
   const doc = JSON.parse(stored)
   assert.equal(doc.mode, 'off')
@@ -132,7 +132,7 @@ test('re-setting a gauge overwrites only that gauge, leaving others intact', () 
   const writeFile = (_path, data) => { stored = data }
   const mkdir = () => {}
 
-  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 70, hard: 85 } } }, { readFile, writeFile, mkdir })
+  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 70, hard: 85 } } }, { readFile, writeFile, mkdir, rename: () => {} })
 
   const doc = JSON.parse(stored)
   assert.deepEqual(doc.gauges.five_hour, { soft: 70, hard: 85 })
@@ -147,7 +147,7 @@ test('an unreadable or corrupt existing session file starts fresh instead of thr
 
   try {
     writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 65, hard: 80 } } },
-      { readFile: () => { throw new Error('ENOENT') }, writeFile, mkdir })
+      { readFile: () => { throw new Error('ENOENT') }, writeFile, mkdir, rename: () => {} })
   } catch { threw = true }
   assert.equal(threw, false)
   assert.deepEqual(JSON.parse(stored), { gauges: { five_hour: { soft: 65, hard: 80 } } })
@@ -155,7 +155,7 @@ test('an unreadable or corrupt existing session file starts fresh instead of thr
   stored = null
   try {
     writeSessionConfig('/d', 's1', { gauges: { seven_day: { soft: 55, hard: 70 } } },
-      { readFile: () => '{ not json', writeFile, mkdir })
+      { readFile: () => '{ not json', writeFile, mkdir, rename: () => {} })
   } catch { threw = true }
   assert.equal(threw, false)
   assert.deepEqual(JSON.parse(stored), { gauges: { seven_day: { soft: 55, hard: 70 } } })
@@ -167,8 +167,27 @@ test('a non-object existing "gauges" (e.g. hand-edited to a string) is treated a
   const writeFile = (_path, data) => { stored = data }
   const mkdir = () => {}
 
-  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 65, hard: 80 } } }, { readFile, writeFile, mkdir })
+  writeSessionConfig('/d', 's1', { gauges: { five_hour: { soft: 65, hard: 80 } } }, { readFile, writeFile, mkdir, rename: () => {} })
 
   const doc = JSON.parse(stored)
   assert.deepEqual(doc.gauges, { five_hour: { soft: 65, hard: 80 } })
+})
+
+test('a write that fails to persist throws rather than reporting success, and cleans up the tmp file', () => {
+  let writeFilePath = null
+  let removedPath = null
+  let threw = false
+
+  try {
+    writeSessionConfig('/d', 's1', { mode: 'enforce' }, {
+      readFile: () => { throw Object.assign(new Error('nope'), { code: 'ENOENT' }) },
+      writeFile: (p) => { writeFilePath = p; throw new Error('disk full') },
+      mkdir: () => {},
+      remove: (p) => { removedPath = p },
+    })
+  } catch { threw = true }
+
+  assert.equal(threw, true)
+  assert.match(writeFilePath, /\.tmp$/)
+  assert.equal(removedPath, writeFilePath)
 })
