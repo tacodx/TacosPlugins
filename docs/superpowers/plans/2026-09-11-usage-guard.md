@@ -467,15 +467,27 @@ export function mergeConfig(userConfig, sessionConfig) {
 
 /** Never throws. Any read or parse failure degrades to the layer below. */
 export function readConfig({ dir, sessionId, readFile }) {
+  let unreadable = false
   // join() lives INSIDE the try: path.join throws on a non-string segment,
   // and readConfig's contract is that no input can make it throw.
   const load = (...segments) => {
     try { return JSON.parse(readFile(join(...segments), 'utf8')) }
-    catch { return {} } // fail-open: a missing or corrupt config must never block a tool call
+    catch (err) {
+      // ENOENT is "no config yet", and the shipped defaults are the right answer.
+      // Anything else means the user HAS settings we cannot read. Falling back to
+      // defaults would silently re-arm a guard they may have deliberately turned off,
+      // so record it and degrade to dry-run below.
+      if (err?.code !== 'ENOENT') unreadable = true
+      return {}
+    }
   }
   const user = load(dir, 'tacos', 'config.json')
   const session = sessionId ? load(dir, 'tacos', 'sessions', `${sessionId}.json`) : {}
-  return mergeConfig(user, session)
+  const merged = mergeConfig(user, session)
+
+  // fail-open, and this is what makes that phrase literally true: a config we could not
+  // read can never produce a denial. It still observes and still reports.
+  return unreadable ? { ...merged, mode: 'dry-run', configUnreadable: true } : merged
 }
 ```
 
