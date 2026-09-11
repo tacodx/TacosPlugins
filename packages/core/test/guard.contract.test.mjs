@@ -11,8 +11,15 @@ test('a blind guard always allows', () => {
   assert.equal(decideForHook({ input: input(), cfg, gauges: null, blind: true }).action, 'allow')
 })
 
+test('a blind guard allows even with real gauge data at 100% in enforce mode', () => {
+  const r = decideForHook({ input: input(), cfg: { ...cfg, mode: 'enforce' }, gauges: at(100), blind: true })
+  assert.equal(r.action, 'allow')
+})
+
 test('below soft, nothing is injected', () => {
-  assert.equal(decideForHook({ input: input(), cfg, gauges: at(10), blind: false }).action, 'allow')
+  const r = decideForHook({ input: input(), cfg, gauges: at(10), blind: false })
+  assert.equal(r.action, 'allow')
+  assert.equal(r.text, null)
 })
 
 test('dry-run never denies, however high the gauge', () => {
