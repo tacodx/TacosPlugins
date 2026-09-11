@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 export const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 export const CLIENT_ID = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID
@@ -21,7 +22,7 @@ export function readCredentials(path, readFile = readFileSync) {
 }
 
 export function isExpired(cred, now, marginMs = EXPIRY_MARGIN_MS) {
-  if (!cred?.expiresAt) return false
+  if (!Number.isFinite(cred?.expiresAt)) return true // missing/zero/null/NaN expiry: treat as already-expired, never as "never expires"
   return now + marginMs >= cred.expiresAt
 }
 
@@ -53,23 +54,50 @@ export async function refreshToken(cred, {
   } catch { return null } // network error, non-JSON body, or any other refresh failure: fail closed to null
 }
 
-/** Read-modify-write. Preserves every sibling key, notably mcpOAuth. Never throws. */
+/**
+ * Read-modify-write. Preserves every sibling key, notably mcpOAuth. Never throws.
+ * Refuses to write at all unless it can prove the target is either genuinely absent
+ * (ENOENT) or a readable, parseable, object-shaped document — an unreadable or corrupt
+ * file must never be silently replaced with just {claudeAiOauth}, since that would
+ * destroy sibling keys we could not actually inspect.
+ */
 export function writeBackCredentials(path, cred, {
   readFile = readFileSync, writeFile = writeFileSync, rename = renameSync,
+  remove = unlinkSync, uuid = randomUUID,
 } = {}) {
+  let raw
   try {
-    let doc = {}
-    try { doc = JSON.parse(readFile(path, 'utf8')) || {} } catch { doc = {} } // missing/corrupt file: start from an empty doc rather than lose the new credentials
-    doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
-    const tmp = `${path}.${process.pid}.tmp`
-    writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600 })
+    raw = readFile(path, 'utf8')
+  } catch (err) {
+    if (err?.code !== 'ENOENT') return // unreadable (EACCES, EMFILE, a read racing another writer, etc.): never overwrite what we couldn't confirm is safe to replace
+    raw = null // file genuinely does not exist yet; starting from an empty doc is safe
+  }
+
+  let doc = {}
+  if (raw !== null) {
+    let parsed
+    try { parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) } // strip a UTF-8 BOM before parsing; some tools write one
+    catch { return } // existing file is corrupt/unparseable: refuse to blindly overwrite it
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return // not a credentials-document shape: refuse to overwrite
+    doc = parsed
+  }
+
+  doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
+  try {
+    // 'wx' guarantees this call always creates the file, so `mode` is always applied —
+    // reusing an existing (possibly world-readable) leftover tmp file would silently keep its old mode.
+    writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600, flag: 'wx' })
     rename(tmp, path)
-  } catch { /* fail-open: a credential we cannot persist is a slow path, not a broken session */ }
+  } catch { // fail-open: a credential we cannot persist is a slow path, not a broken session
+    try { remove(tmp) } catch { /* tmp may never have been created (writeFile itself failed); nothing to clean up */ }
+  }
 }
 
 /** Returns {token, error}. Never throws. */
 export async function getAccessToken({
   dir, now, fetchImpl = fetch, readFile = readFileSync, writeFile = writeFileSync,
+  rename = renameSync, remove = unlinkSync,
 }) {
   const path = credentialsPath(dir)
   const cred = readCredentials(path, readFile)
@@ -77,7 +105,8 @@ export async function getAccessToken({
   if (!isExpired(cred, now)) return { token: cred.accessToken, error: null }
 
   const refreshed = await refreshToken(cred, { fetchImpl })
-  if (!refreshed) return { token: null, error: 'refresh-failed' }
-  writeBackCredentials(path, refreshed, { readFile, writeFile })
+  // a dead token that still happens to work beats returning null and guaranteeing failure
+  if (!refreshed) return { token: cred.accessToken, error: 'refresh-failed-using-existing' }
+  writeBackCredentials(path, refreshed, { readFile, writeFile, rename, remove })
   return { token: refreshed.accessToken, error: null }
 }
