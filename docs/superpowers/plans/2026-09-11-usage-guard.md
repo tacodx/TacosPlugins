@@ -91,7 +91,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const readJson = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'))
@@ -911,7 +911,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { normalise, fetchUsage, USAGE_URL } from '../usage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -1248,7 +1248,7 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
 #!/usr/bin/env node
 import { readdirSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 /** Copies every top-level .mjs from coreDir into targetLibDir. Returns copied filenames. */
 export function vendorCore(coreDir, targetLibDir) {
@@ -1351,7 +1351,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { parseHookInput, allowOutput, denyOutput, contextOutput } from '../hookio.mjs'
 
 const CORE = dirname(fileURLToPath(import.meta.url)).replace(/\/test$/, '')
@@ -1954,7 +1954,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
