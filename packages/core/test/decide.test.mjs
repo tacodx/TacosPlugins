@@ -46,3 +46,17 @@ test('soft equal to hard skips the advisory stage', () => {
     { five_hour: { soft: 80, hard: 80 } })
   assert.equal(r.state, STATE.HARD)
 })
+
+test('NaN hard threshold leaves gauge ungoverned', () => {
+  const r = decide({ five_hour: { percent: 95, resetsAt: 'A' } },
+    { five_hour: { soft: 75, hard: NaN } })
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})
+
+test('NaN soft threshold leaves gauge ungoverned', () => {
+  const r = decide({ five_hour: { percent: 95, resetsAt: 'A' } },
+    { five_hour: { soft: NaN, hard: 90 } })
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})

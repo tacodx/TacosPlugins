@@ -16,7 +16,9 @@ export function decide(gauges, thresholds) {
   for (const [name, limit] of Object.entries(thresholds)) {
     const gauge = gauges[name]
     if (!gauge || typeof gauge.percent !== 'number' || Number.isNaN(gauge.percent)) continue
-    if (!limit || typeof limit.soft !== 'number' || typeof limit.hard !== 'number') continue
+    if (!limit) continue
+    if (typeof limit.soft !== 'number' || Number.isNaN(limit.soft)) continue
+    if (typeof limit.hard !== 'number' || Number.isNaN(limit.hard)) continue
 
     let state = STATE.OK
     if (gauge.percent >= limit.hard) state = STATE.HARD
