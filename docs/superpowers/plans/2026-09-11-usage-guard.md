@@ -23,6 +23,7 @@ Every task's requirements implicitly include this section.
 - **`cwd` at hook time is the user's project directory**, never the plugin root. Derive paths from `process.env.CLAUDE_PLUGIN_ROOT`.
 - **Never write `"matcher": "*"`.** A matcher containing characters outside `[A-Za-z0-9_|,-]` compiles as a JS RegExp, and a lone `*` is invalid ("nothing to repeat"). Invalid matchers return false silently. Omit the key to match all tools.
 - **Commits carry no `Co-Authored-By` trailer and no "Generated with" line.** This is the repo owner's standing rule.
+- **Every fail-open `catch` carries a one-line comment** saying it is deliberate and why. The empty catches in `cache.mjs`, `auth.mjs`, `config.mjs` and `session.mjs`, and the `uncaughtException`/`unhandledRejection` handlers in `hookio.mjs`, are required by the fail-open rule above — not oversights.
 - **No network calls in tests.** Every module that touches the network takes an injected `fetchImpl`.
 - **Injected clock.** Anything time-dependent takes a `now` parameter (milliseconds) so tests are deterministic.
 
@@ -727,6 +728,7 @@ test('write-back preserves sibling keys such as mcpOAuth', () => {
   writeBackCredentials('/p', { accessToken: 'new', refreshToken: 'r2', expiresAt: 9 }, {
     readFile: () => JSON.stringify({ mcpOAuth: { server: { token: 'keep' } }, claudeAiOauth: cred }),
     writeFile: (_p, body) => { written = JSON.parse(body) },
+    rename: () => {},
   })
   assert.equal(written.mcpOAuth.server.token, 'keep', 'mcp tokens must survive')
   assert.equal(written.claudeAiOauth.accessToken, 'new')
@@ -737,6 +739,7 @@ test('write-back uses mode 0600', () => {
   writeBackCredentials('/p', cred, {
     readFile: () => JSON.stringify({ claudeAiOauth: cred }),
     writeFile: (_p, _b, opts) => { mode = opts?.mode },
+    rename: () => {},
   })
   assert.equal(mode, 0o600)
 })
@@ -809,7 +812,7 @@ export async function refreshToken(cred, {
 
 /** Read-modify-write. Preserves every sibling key, notably mcpOAuth. Never throws. */
 export function writeBackCredentials(path, cred, {
-  readFile = readFileSync, writeFile = writeFileSync,
+  readFile = readFileSync, writeFile = writeFileSync, rename = renameSync,
 } = {}) {
   try {
     let doc = {}
@@ -817,8 +820,8 @@ export function writeBackCredentials(path, cred, {
     doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
     const tmp = `${path}.${process.pid}.tmp`
     writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600 })
-    try { renameSync(tmp, path) } catch { /* injected writeFile in tests */ }
-  } catch { /* ignore */ }
+    rename(tmp, path)
+  } catch { /* fail open: a credential we cannot persist is a slow path, not a broken session */ }
 }
 
 /** Returns {token, error}. Never throws. */
