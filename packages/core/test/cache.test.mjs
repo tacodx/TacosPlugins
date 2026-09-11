@@ -54,36 +54,39 @@ test('a stale lock is broken and retaken', async () => {
   assert.equal(removed, true)
 })
 
-test('writeCache succeeds: entry written contains fetchedAt and data', () => {
-  let writtenContent
-  assert.doesNotThrow(() => writeCache('/c', { result: 42 }, {
-    now: 5000,
+test('writeCache writes fetchedAt and data, then renames tmp over path', () => {
+  let wrote = null
+  let renamed = null
+  writeCache('/c/usage.json', { five_hour: { percent: 5 } }, {
+    now: 1234,
     mkdir: () => {},
-    writeFile: (path, content) => {
-      writtenContent = JSON.parse(content)
-    },
-    rename: (tmp, final) => {
-      assert.equal(writtenContent.fetchedAt, 5000)
-      assert.deepEqual(writtenContent.data, { result: 42 })
-      assert.equal(tmp, `/c.${process.pid}.tmp`)
-      assert.equal(final, '/c')
-    },
-  }))
+    writeFile: (p, body) => { wrote = { p, body } },
+    rename: (from, to) => { renamed = { from, to } },
+    remove: () => {},
+  })
+  // Assert AFTER the call returns. An assertion thrown inside an injected mock
+  // would be swallowed by writeCache's own fail-open catch, making this vacuous.
+  assert.ok(wrote, 'writeFile must be called')
+  const entry = JSON.parse(wrote.body)
+  assert.equal(entry.fetchedAt, 1234)
+  assert.deepEqual(entry.data, { five_hour: { percent: 5 } })
+  assert.ok(renamed, 'rename must be called')
+  assert.equal(renamed.from, wrote.p, 'rename must move the tmp file that was written')
+  assert.equal(renamed.to, '/c/usage.json')
 })
 
-test('writeCache failed rename cleans up tmp file', () => {
-  let removed = false
-  assert.doesNotThrow(() => writeCache('/c', { a: 1 }, {
+test('writeCache cleans up tmp on rename failure', () => {
+  let removed = null
+  writeCache('/c', { a: 1 }, {
     now: 1,
     mkdir: () => {},
     writeFile: () => {},
     rename: () => { throw new Error('readonly') },
-    remove: (path) => {
-      assert.equal(path, `/c.${process.pid}.tmp`)
-      removed = true
-    },
-  }))
-  assert.equal(removed, true, 'tmp file must be cleaned up on rename failure')
+    remove: (path) => { removed = path },
+  })
+  // Assert AFTER the call returns. An assertion inside the remove mock would be
+  // swallowed by writeCache's own fail-open catch.
+  assert.equal(removed, `/c.${process.pid}.tmp`, 'tmp file path must be cleaned up on rename failure')
 })
 
 test('uncontended lock acquire calls removeLock after fn resolves', async () => {
