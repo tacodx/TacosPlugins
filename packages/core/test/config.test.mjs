@@ -7,7 +7,7 @@ test('defaults govern all four gauges and weekly is tighter than five_hour', () 
   assert.ok(DEFAULTS.gauges.extra_usage && DEFAULTS.gauges.scoped)
   assert.ok(DEFAULTS.gauges.seven_day.hard < DEFAULTS.gauges.five_hour.hard,
     'overshooting the weekly costs days, so it brakes earlier')
-  assert.equal(DEFAULTS.mode, 'dry-run')
+  assert.equal(DEFAULTS.mode, 'enforce')
 })
 
 test('session config overrides user config overrides defaults', () => {
@@ -25,7 +25,7 @@ test('mode off in the session config wins', () => {
 })
 
 test('an unknown mode falls back to the default rather than blocking', () => {
-  assert.equal(mergeConfig({ mode: 'banana' }, {}).mode, 'dry-run')
+  assert.equal(mergeConfig({ mode: 'banana' }, {}).mode, 'enforce')
 })
 
 test('configDir honours CLAUDE_CONFIG_DIR and never expands a tilde', () => {
