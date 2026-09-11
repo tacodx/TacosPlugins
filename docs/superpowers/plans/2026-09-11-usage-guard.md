@@ -1087,7 +1087,7 @@ export async function fetchUsage({ token, fetchImpl = fetch, timeoutMs = 3000 })
     })
     if (!res?.ok) return { raw: null, error: `http-${res?.status ?? 'unknown'}` }
     return { raw: await res.json(), error: null }
-  } catch (err) {
+  } catch (err) { // fail-open: a failed fetch becomes a reported error, never a throw into the hook
     return { raw: null, error: err?.name === 'AbortError' ? 'timeout' : 'network' }
   } finally { clearTimeout(timer) }
 }
