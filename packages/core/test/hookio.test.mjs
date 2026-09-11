@@ -95,3 +95,58 @@ test('the deadline does not itself keep the process alive when nothing else is p
   assert.equal(out.trim(), '')
   assert.ok(elapsed < 1000, `expected the unref'd deadline to let the process exit fast rather than wait out the full 5s, took ${elapsed}ms`)
 })
+
+test('run prints a deny decision exactly, round-tripping through JSON', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run, denyOutput } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => denyOutput('PreToolUse', 'ceiling hit'))
+  `)
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8' })
+  const parsed = JSON.parse(out)
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'PreToolUse')
+  assert.equal(parsed.hookSpecificOutput.permissionDecision, 'deny')
+  assert.equal(parsed.hookSpecificOutput.permissionDecisionReason, 'ceiling hit')
+})
+
+test('run prints a context decision exactly, round-tripping through JSON', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run, contextOutput } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => contextOutput('UserPromptSubmit', 'at 76%'))
+  `)
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8' })
+  const parsed = JSON.parse(out)
+  assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit')
+  assert.equal(parsed.hookSpecificOutput.additionalContext, 'at 76%')
+})
+
+test('run exits 0 and emits nothing when something throws outside the promise chain', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => {
+      setImmediate(() => { throw new Error('boom outside the chain') })
+      return new Promise(() => {}) // keep the chain's own .then/.catch from resolving first
+    })
+  `)
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8' })
+  assert.equal(out.trim(), '', 'an uncaughtException outside the chain must still allow')
+})
+
+test('run exits 0 and emits nothing when a detached promise rejects outside the chain', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => {
+      Promise.reject(new Error('detached rejection')) // never awaited, never returned
+      return new Promise(() => {}) // keep the chain's own .then/.catch from resolving first
+    })
+  `)
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8' })
+  assert.equal(out.trim(), '', 'an unhandledRejection outside the chain must still allow')
+})
