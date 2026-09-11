@@ -48,3 +48,14 @@ test('a missing file is not an error', () => {
   })
   assert.equal(r.mode, DEFAULTS.mode)
 })
+
+test('invalid dir (e.g. undefined) never throws and returns defaults', () => {
+  const fn = () => readConfig({
+    dir: undefined, sessionId: 's1',
+    readFile: () => '{}',
+  })
+  assert.doesNotThrow(fn)
+  const r = fn()
+  assert.deepEqual(r.gauges, DEFAULTS.gauges)
+  assert.equal(r.mode, DEFAULTS.mode)
+})

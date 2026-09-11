@@ -33,12 +33,14 @@ export function mergeConfig(userConfig, sessionConfig) {
   return { gauges, mode: MODES.has(requested) ? requested : DEFAULTS.mode }
 }
 
-/** Never throws. Any read or parse failure degrades to the layer below. */
 export function readConfig({ dir, sessionId, readFile }) {
-  const load = (path) => {
-    try { return JSON.parse(readFile(path, 'utf8')) } catch { return {} }
+  // join() lives INSIDE the try: path.join throws on a non-string segment,
+  // and readConfig's contract is that no input can make it throw.
+  const load = (...segments) => {
+    try { return JSON.parse(readFile(join(...segments), 'utf8')) }
+    catch { return {} } // fail-open: a missing or corrupt config must never block a tool call
   }
-  const user = load(join(dir, 'tacos', 'config.json'))
-  const session = sessionId ? load(join(dir, 'tacos', 'sessions', `${sessionId}.json`)) : {}
+  const user = load(dir, 'tacos', 'config.json')
+  const session = sessionId ? load(dir, 'tacos', 'sessions', `${sessionId}.json`) : {}
   return mergeConfig(user, session)
 }
