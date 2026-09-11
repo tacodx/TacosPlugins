@@ -1768,7 +1768,7 @@ Expected: FAIL — cannot find module `../session.mjs`.
 - [ ] **Step 3: Write `session.mjs`**
 
 ```js
-import { writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ALIASES = {
@@ -1796,11 +1796,24 @@ export function parseBudgetArgs(argv) {
 }
 
 export function writeSessionConfig(dir, sessionId, patch, {
-  writeFile = writeFileSync, mkdir = mkdirSync,
+  writeFile = writeFileSync, mkdir = mkdirSync, readFile = readFileSync,
 } = {}) {
   const path = sessionPath(dir, sessionId)
+
+  // MERGE, never replace. Each /budget call carries only the one setting the user just
+  // named, so overwriting would make `/budget weekly 70` silently discard the ceiling
+  // they set with `/budget 80` a moment earlier.
+  let existing = {}
+  try { existing = JSON.parse(readFile(path, 'utf8')) }
+  catch { existing = {} } // no prior file, or an unreadable one: start fresh rather than throw
+  if (existing === null || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
+
+  const merged = { ...existing, ...patch }
+  const gauges = { ...(existing.gauges || {}), ...(patch.gauges || {}) }
+  if (Object.keys(gauges).length > 0) merged.gauges = gauges
+
   mkdir(join(dir, 'tacos', 'sessions'), { recursive: true })
-  writeFile(path, JSON.stringify(patch, null, 2), { mode: 0o600 })
+  writeFile(path, JSON.stringify(merged, null, 2), { mode: 0o600 })
 }
 
 export function gcSessions(dir, {
