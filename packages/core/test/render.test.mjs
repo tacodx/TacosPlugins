@@ -51,7 +51,7 @@ test('a HARD decision rounds the percent instead of printing the raw float', () 
   assert.doesNotMatch(out, /91\.6/)
 })
 
-test('an unreadable config surfaces a line instead of degrading silently', () => {
+test('an unreadable config that degraded to dry-run says the guard is observing only', () => {
   const gauges = { five_hour: { percent: 10, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
   const out = renderStatus({
     gauges, thresholds: DEFAULTS.gauges, decision: { state: STATE.OK },
@@ -59,6 +59,24 @@ test('an unreadable config surfaces a line instead of degrading silently', () =>
   })
   assert.match(out, /config could not be read/i)
   assert.match(out, /observing/i)
+})
+
+test('an unreadable config that preserved an explicit "enforce" must not claim the guard is passive', () => {
+  // readConfig never discards a mode a readable layer stated explicitly — only a
+  // layer that named no mode at all degrades to dry-run. If the corrupt layer was,
+  // say, a stale session file while the user's own config.json still reads
+  // "enforce", the guard is genuinely enforcing. Telling the user it is "observing
+  // only" here would be actively false safety information while their tool calls
+  // can still be denied.
+  const gauges = { five_hour: { percent: 10, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges, thresholds: DEFAULTS.gauges, decision: { state: STATE.OK },
+    mode: 'enforce', blind: false, configUnreadable: true,
+  })
+  assert.match(out, /config could not be read/i)
+  assert.match(out, /mode in effect: enforce/i)
+  assert.doesNotMatch(out, /observing only/i)
+  assert.doesNotMatch(out, /not enforcing/i)
 })
 
 test('a watch-only gauge still renders, marked as such', () => {

@@ -13,7 +13,15 @@ export function bar(percent, width = 14) {
 
 export function renderStatus({ gauges, thresholds, decision, mode, blind, reason, configUnreadable }) {
   const lines = [`usage-guard  [mode: ${mode}]`, '']
-  if (configUnreadable) lines.push('  config could not be read; the guard is observing only, not enforcing.', '')
+  if (configUnreadable) {
+    // readConfig only ever degrades to dry-run when NO readable layer named a mode.
+    // A mode a readable layer stated explicitly (e.g. "enforce" in config.json, with
+    // only a sibling session file corrupted) survives unreadable=true intact — so this
+    // message must never claim passivity except in the one case it's actually true.
+    lines.push(`  part of the config could not be read. Mode in effect: ${mode}.`)
+    if (mode === 'dry-run') lines.push('  the guard is observing only, not enforcing.')
+    lines.push('')
+  }
   if (blind || !gauges) {
     lines.push(`  no usage data available (${reason || 'unknown'})`)
     lines.push('  the guard is blind and is allowing everything.')
