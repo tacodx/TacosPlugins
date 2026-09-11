@@ -17,8 +17,7 @@ per-chat ceiling against them:
 - **At the soft threshold** — a short advisory is injected into the
   conversation: finish what's in flight, don't start new large-scope work,
   prefer a couple of targeted agents over broad fan-out. New agent/workflow
-  fan-out (`PreToolUse` on `Agent`, `Workflow`, or `Task`) is denied; agents
-  already running are unaffected.
+  fan-out is denied at `PreToolUse`; agents already running are unaffected.
 - **At the hard ceiling** — new tool calls are denied outright so the chat
   winds down. Work already in flight still completes; see Limitations.
 
