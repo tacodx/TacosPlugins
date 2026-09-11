@@ -53,3 +53,45 @@ test('run exits 0 and emits nothing when stdin is garbage', () => {
   const out = execFileSync('node', [script], { input: '<<<garbage>>>', encoding: 'utf8' })
   assert.equal(out.trim(), '')
 })
+
+test('run exits 0 and emits nothing when main resolves to a value JSON.stringify cannot serialise', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => ({ bad: 1n })) // BigInt is not JSON-serialisable
+  `)
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8' })
+  assert.equal(out.trim(), '', 'an unserialisable decision object must still allow, never crash')
+})
+
+test('run exits 0 via the deadline when something else would otherwise hang the process forever', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => {
+      setInterval(() => {}, 1000) // a lingering handle that would otherwise keep the process alive forever
+      return new Promise(() => {}) // main itself never resolves
+    }, 300) // short injected deadline so the suite does not sit for 4.5s
+  `)
+  const start = Date.now()
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8', timeout: 4000 })
+  const elapsed = Date.now() - start
+  assert.equal(out.trim(), '')
+  assert.ok(elapsed < 2000, `expected the 300ms deadline to force an exit well under 2s, took ${elapsed}ms`)
+})
+
+test('the deadline does not itself keep the process alive when nothing else is pending', () => {
+  const d = mkdtempSync(join(tmpdir(), 'hookio-'))
+  const script = join(d, 's.mjs')
+  writeFileSync(script, `
+    import { run } from '${join(CORE, 'hookio.mjs')}'
+    run(async () => new Promise(() => {}), 5000) // a long deadline that a correctly-unref'd timer should never need to reach
+  `)
+  const start = Date.now()
+  const out = execFileSync('node', [script], { input: '{}', encoding: 'utf8', timeout: 2000 })
+  const elapsed = Date.now() - start
+  assert.equal(out.trim(), '')
+  assert.ok(elapsed < 1000, `expected the unref'd deadline to let the process exit fast rather than wait out the full 5s, took ${elapsed}ms`)
+})

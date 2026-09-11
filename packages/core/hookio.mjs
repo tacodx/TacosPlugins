@@ -24,13 +24,17 @@ async function readStdin() {
 /**
  * ALWAYS exits 0. exit 2 is the only code that blocks a tool call, so an
  * uncaught throw here would deny every matching call.
+ *
+ * deadlineMs is injectable (default 4500) purely so tests can exercise the
+ * deadline path without the suite sitting for 4.5s; production call sites
+ * never need to pass it.
  */
-export function run(main) {
+export function run(main, deadlineMs = 4500) {
   const finish = (output) => {
     try { if (output) process.stdout.write(JSON.stringify(output)) } catch { /* malformed output (e.g. BigInt, circular ref) must still allow */ }
     process.exit(0)
   }
-  const guard = setTimeout(() => finish(null), 4500)
+  const guard = setTimeout(() => finish(null), deadlineMs)
   guard.unref() // the deadline is a safety net, not a reason to keep the process alive
   readStdin()
     .then((raw) => main(parseHookInput(raw)))
