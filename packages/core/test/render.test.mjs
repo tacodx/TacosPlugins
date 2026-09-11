@@ -32,3 +32,21 @@ test('a governed gauge shows its percent and thresholds', () => {
   assert.match(out, /35/)
   assert.match(out, /75/)
 })
+
+test('a SOFT decision rounds the percent instead of printing the raw float', () => {
+  const gauges = { five_hour: null, seven_day: null, extra_usage: { percent: 84.13333333333334, resetsAt: null }, scoped: [] }
+  const decision = { state: STATE.SOFT, gauge: 'extra_usage', percent: 84.13333333333334, soft: 70, hard: 85 }
+  const out = renderStatus({ gauges, thresholds: DEFAULTS.gauges, decision, mode: 'enforce', blind: false })
+  assert.match(out, /decision: advise/)
+  assert.match(out, /84%/)
+  assert.doesNotMatch(out, /84\.13/)
+})
+
+test('a HARD decision rounds the percent instead of printing the raw float', () => {
+  const gauges = { five_hour: null, seven_day: null, extra_usage: { percent: 91.6666666666667, resetsAt: null }, scoped: [] }
+  const decision = { state: STATE.HARD, gauge: 'extra_usage', percent: 91.6666666666667, soft: 70, hard: 85 }
+  const out = renderStatus({ gauges, thresholds: DEFAULTS.gauges, decision, mode: 'enforce', blind: false })
+  assert.match(out, /decision: deny/)
+  assert.match(out, /92%/)
+  assert.doesNotMatch(out, /91\.6/)
+})

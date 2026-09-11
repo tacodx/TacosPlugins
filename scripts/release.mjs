@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { readdirSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
+import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** Copies every top-level .mjs from coreDir into targetLibDir. Returns copied filenames. */
+/** Copies every top-level .mjs from coreDir into targetLibDir, pruning any .mjs
+ *  in targetLibDir that no longer has a source in coreDir. Returns copied filenames. */
 export function vendorCore(coreDir, targetLibDir) {
   mkdirSync(targetLibDir, { recursive: true })
   const copied = []
@@ -12,6 +13,12 @@ export function vendorCore(coreDir, targetLibDir) {
     if (statSync(join(coreDir, name)).isDirectory()) continue
     copyFileSync(join(coreDir, name), join(targetLibDir, name))
     copied.push(name)
+  }
+  const wanted = new Set(copied)
+  for (const name of readdirSync(targetLibDir)) {
+    if (name.endsWith('.mjs') && !wanted.has(name)) {
+      rmSync(join(targetLibDir, name), { force: true })
+    }
   }
   return copied
 }

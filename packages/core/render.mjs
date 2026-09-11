@@ -34,7 +34,7 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
   lines.push('')
   const state = decision?.state ?? STATE.OK
   if (state === STATE.OK) lines.push('  decision: allow — below every soft threshold.')
-  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${decision.percent}% (soft ${decision.soft}). New fan-out would be declined.`)
-  else lines.push(`  decision: deny — ${decision.gauge} at ${decision.percent}% (ceiling ${decision.hard}).`)
+  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${Math.round(decision.percent)}% (soft ${decision.soft}). New fan-out would be declined.`)
+  else lines.push(`  decision: deny — ${decision.gauge} at ${Math.round(decision.percent)}% (ceiling ${decision.hard}).`)
   return lines.join('\n')
 }
