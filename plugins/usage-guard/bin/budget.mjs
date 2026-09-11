@@ -21,7 +21,7 @@ gcSessions(dir, { now: Date.now() })
 if (rest.length === 0) {
   const cfg = readConfig({ dir, sessionId, readFile: readFileSync })
   const { gauges, blind, reason } = await getGauges({ dir, now: Date.now() })
-  console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision: blind ? null : decide(gauges, cfg.gauges), mode: cfg.mode, blind, reason }))
+  console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision: blind ? null : decide(gauges, cfg.gauges), mode: cfg.mode, blind, reason, configUnreadable: cfg.configUnreadable }))
   process.exit(0)
 }
 
