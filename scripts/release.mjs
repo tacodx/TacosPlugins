@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** Copies every top-level .mjs from coreDir into targetLibDir, pruning any .mjs
  *  in targetLibDir that no longer has a source in coreDir. Returns copied filenames. */
@@ -23,7 +23,7 @@ export function vendorCore(coreDir, targetLibDir) {
   return copied
 }
 
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 if (isMain) {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
   const core = join(root, 'packages', 'core')
