@@ -54,6 +54,40 @@ test('renders nothing misleading with no buckets', () => {
   assert.doesNotMatch(out, /\d+%/)
 })
 
+// --- Finding 4: "no buckets reported" vs "could not read the usage data" are DIFFERENT claims ---
+
+test('unavailable data prints no percentages, no bucket list, and names the reason', () => {
+  const out = renderBuckets({
+    buckets, model: 'claude-opus-5', helps: false, reason: 'nope', bucket: null,
+    unavailable: true, unavailableReason: 'network',
+  })
+  assert.doesNotMatch(out, /%/, 'unavailable usage data must never print a percentage')
+  assert.doesNotMatch(out, /session|weekly_all|weekly_scoped/, 'no bucket list either')
+  assert.doesNotMatch(out, /no rate-limit buckets were reported/i,
+    'this is not the same claim as a successful read finding zero buckets')
+  assert.match(out, /could not be read/i)
+  assert.match(out, /network/)
+})
+
+test('unavailable data with no known reason still says plainly that it could not be read', () => {
+  const out = renderBuckets({
+    buckets, model: 'claude-opus-5', helps: false, reason: 'nope', bucket: null,
+    unavailable: true, unavailableReason: null,
+  })
+  assert.doesNotMatch(out, /%/)
+  assert.match(out, /could not be read/i)
+})
+
+test('buckets passed alongside `unavailable: true` are still never rendered — unavailable wins', () => {
+  // Defensive: even if a caller mistakenly passed a non-empty bucket list alongside
+  // `unavailable`, this must never leak a percentage.
+  const out = renderBuckets({
+    buckets, model: 'claude-opus-5', helps: true, reason: 'nope', bucket: buckets[0],
+    unavailable: true, unavailableReason: 'stale-cache',
+  })
+  assert.doesNotMatch(out, /%/)
+})
+
 test('marks exactly the bucket object it is handed, nothing else', () => {
   // renderBuckets has no binding()/scope logic of its own any more — it marks whichever
   // bucket object `switchingHelps` returned, by reference, and nothing else. Passing
@@ -213,6 +247,41 @@ test('the real /limits process against an empty config dir prints a clean no-dat
     assert.doesNotMatch(out, /\bat \S+ \(.*:\d+:\d+\)/, 'must never print a stack trace frame')
     assert.doesNotMatch(out, /\d+%/, 'no data means no percentages')
     assert.match(out, /no rate-limit buckets|could not be determined/i)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the real /limits process treats a stale cache as unreadable, not as a genuinely empty account', () => {
+  // Finding 4, end to end: a gauge cache older than its TTL (60s) but still within
+  // maxStale (900s) is exactly the "serving a stale reading" shape getGauges returns
+  // with fresh:false. With no .credentials.json present, the live refetch this triggers
+  // fails closed with 'no-credentials' instead of replacing it with a fresh read — the
+  // real shape of "stale cache, can't refresh it either" this finding is about, not a
+  // fabricated blind/fresh pair.
+  const dir = mkdtempSync(join(tmpdir(), 'model-advisor-limits-test-'))
+  try {
+    const staleFetchedAt = Date.now() - 100_000
+    writeCache(join(dir, 'tacos', 'usage-cache.json'),
+      { five_hour: null, seven_day: null, extra_usage: null, scoped: [] },
+      { now: staleFetchedAt })
+    writeCache(rawCachePath(dir), {
+      limits: [
+        { kind: 'weekly_all', group: 'weekly', percent: 40, is_active: true, resets_at: 'W', scope: null },
+      ],
+    }, { now: staleFetchedAt })
+
+    const out = execFileSync('node', [LIMITS, 's1'], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+    })
+
+    assert.doesNotMatch(out, /%/, 'a stale-cache read must never print a percentage')
+    assert.doesNotMatch(out, /weekly_all/, 'no bucket list either, even though one is cached underneath')
+    assert.doesNotMatch(out, /no rate-limit buckets were reported/i,
+      'that claim is for a successful read that found zero buckets, not this one')
+    assert.match(out, /could not be read/i)
+    assert.match(out, /no-credentials/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

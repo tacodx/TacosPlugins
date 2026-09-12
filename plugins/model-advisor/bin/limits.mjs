@@ -25,8 +25,18 @@ try {
   // renderBuckets) that could ever supply a real value. (The design doc's §5/§7 still
   // describe an effort line; that text is now stale and needs reconciling separately.)
 
-  const { raw } = await getGauges({ dir, now: Date.now(), wantRaw: true })
-  const buckets = normaliseLimits(raw)
+  const { raw, blind, reason: usageReason, fresh } = await getGauges({ dir, now: Date.now(), wantRaw: true })
+
+  // `blind` or a non-fresh read (a stale cache being served past its normal TTL, or a
+  // 429/generic backoff window) both mean the usage data itself could not be read right
+  // now — as distinct from a successful read that genuinely found zero buckets. Printing
+  // "no rate-limit buckets were reported" in that case would assert something about the
+  // account with no basis: the account may report plenty of buckets on the next good
+  // read. So this collapses to a THIRD state, handled entirely by renderBuckets's own
+  // `unavailable` branch — no percentages, no bucket list, just the fact that the read
+  // failed and (when known) why.
+  const unavailable = blind || fresh === false
+  const buckets = unavailable ? [] : normaliseLimits(raw)
 
   // No transcript_path reaches this CLI directly (see above), but the session id does —
   // recover the transcript by searching for it under <dir>/projects/, one level deep.
@@ -37,9 +47,13 @@ try {
   const transcriptPath = sessionId ? findSessionTranscript(dir, sessionId) : null
   const model = currentModel({ transcriptPath, settingsPath: join(dir, 'settings.json') })
 
-  const { helps, reason, bucket } = switchingHelps(buckets, model)
+  const { helps, reason, bucket } = unavailable
+    ? { helps: false, reason: null, bucket: null }
+    : switchingHelps(buckets, model)
 
-  console.log(renderBuckets({ buckets, model, helps, reason, bucket }))
+  console.log(renderBuckets({
+    buckets, model, helps, reason, bucket, unavailable, unavailableReason: usageReason,
+  }))
 } catch (err) {
   console.log(`model-advisor: /limits could not run — ${err?.message ?? 'unknown error'}`)
 }

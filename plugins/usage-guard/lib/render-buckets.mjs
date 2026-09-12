@@ -25,11 +25,25 @@ import { bar } from './render.mjs'
  * use, while `switchingHelps`'s sentence talked about a different bucket entirely — two
  * independent answers to "which bucket binds" that could, and did, disagree. There is
  * now exactly one place that decides that question.
+ *
+ * `unavailable` (with `unavailableReason`) is a THIRD state, distinct from "the account
+ * reported zero buckets": it means the usage data itself could not be read right now —
+ * blind, or serving a cache stale enough that `getGauges` no longer considers it usable.
+ * Printing "no rate-limit buckets were reported" in that case would assert something
+ * about the account with no basis — the account may have plenty of buckets, we simply
+ * have no fresh read of them. So this branch prints neither a bucket list nor any
+ * percentage at all, only that the read failed and (when known) why.
  */
-export function renderBuckets({ buckets, model, helps, reason, bucket }) {
+export function renderBuckets({ buckets, model, helps, reason, bucket, unavailable, unavailableReason }) {
   const lines = ['model-advisor: /limits', '']
   lines.push(`  model:  ${model ?? 'could not be determined'}`)
   lines.push('')
+
+  if (unavailable) {
+    const why = unavailableReason ? ` (reason: ${unavailableReason})` : ''
+    lines.push(`  Usage data could not be read${why}. No bucket information is available.`)
+    return lines.join('\n')
+  }
 
   const list = Array.isArray(buckets) ? buckets : []
   if (list.length === 0) {
