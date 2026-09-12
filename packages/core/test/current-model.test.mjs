@@ -48,3 +48,11 @@ test('never throws; returns null when everything fails', () => {
   })
   assert.equal(m, null)
 })
+
+test('returns null, not a guessed default, when there is no settings path to fall back to', () => {
+  const m = currentModel({
+    transcriptPath: '/t', settingsPath: undefined,
+    readFile: () => '',
+  })
+  assert.equal(m, null)
+})
