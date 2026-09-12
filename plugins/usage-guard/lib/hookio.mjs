@@ -40,6 +40,12 @@ export function run(main, deadlineMs = 4500) {
     .then((raw) => main(parseHookInput(raw)))
     .then((out) => { clearTimeout(guard); finish(out) })
     .catch(() => { clearTimeout(guard); finish(null) }) // any failure in reading stdin or running main must still allow
-  process.on('uncaughtException', () => finish(null)) // last-resort net: a bug here must allow, never deny
-  process.on('unhandledRejection', () => finish(null)) // last-resort net: a bug here must allow, never deny
+  // These two are NOT load-bearing for deny-safety: Node's own default handler for an
+  // uncaught exception or rejection already exits with code 1, and Claude Code only
+  // treats exit 2 as a deny — exit 1 already allows. No path through this file ever
+  // produces exit 2. What these buy instead is stderr hygiene (no raw stack trace
+  // printed past a hook's own timeout) and a clean, deliberate exit 0 in place of
+  // Node's default exit 1, so a hook failure looks the same as a normal allow.
+  process.on('uncaughtException', () => finish(null))
+  process.on('unhandledRejection', () => finish(null))
 }
