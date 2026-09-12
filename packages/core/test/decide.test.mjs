@@ -94,3 +94,58 @@ test('enforce:0 is falsy but not the literal false, so the gauge still enforces'
     { five_hour: { soft: 75, hard: 90, enforce: 0 } })
   assert.equal(r.state, STATE.HARD)
 })
+
+const NOW = Date.parse('2026-09-11T12:00:00Z')
+
+test('an expired resetsAt skips the gauge entirely, even at 100%', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: '2026-09-11T11:00:00Z' } }, // an hour in the past
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})
+
+test('a resetsAt exactly at now counts as already passed', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: '2026-09-11T12:00:00Z' } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.OK)
+})
+
+test('a future resetsAt evaluates the gauge normally', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: '2026-09-11T13:00:00Z' } }, // an hour ahead
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD)
+  assert.equal(r.gauge, 'five_hour')
+})
+
+test('an absent resetsAt (null) still evaluates the gauge normally, never disabling it', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: null } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('an unparseable resetsAt still evaluates the gauge normally, never disabling it', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: 'not-a-date' } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('decide defaults now to the real clock when omitted', () => {
+  const farFuture = new Date(Date.now() + 3_600_000).toISOString()
+  const r = decide({ five_hour: { percent: 100, resetsAt: farFuture } }, { five_hour: { soft: 75, hard: 90 } })
+  assert.equal(r.state, STATE.HARD, 'a resetsAt an hour from the real now must not be treated as already past')
+})

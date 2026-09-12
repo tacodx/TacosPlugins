@@ -36,7 +36,7 @@ const blindNotice = (reason) =>
   `usage-guard has no usage data (${reason || 'unknown'}) and is allowing everything this session.`
 
 /** Pure, so it can be tested without fs or network. */
-export function decideForHook({ input, cfg, gauges, blind, reason }) {
+export function decideForHook({ input, cfg, gauges, blind, reason, now = Date.now() }) {
   if (cfg.mode === 'off') return { action: 'allow', text: null }
   if (blind || !gauges) {
     // Spec §9: when blind, say so once per session rather than silently implying 0%
@@ -46,7 +46,7 @@ export function decideForHook({ input, cfg, gauges, blind, reason }) {
     if (input.hook_event_name === 'SessionStart') return { action: 'context', text: blindNotice(reason) }
     return { action: 'allow', text: null }
   }
-  const d = decide(gauges, cfg.gauges)
+  const d = decide(gauges, cfg.gauges, now)
   if (d.state === STATE.OK) return { action: 'allow', text: null }
 
   const event = input.hook_event_name
@@ -70,9 +70,10 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 
 if (isMain) run(async (input) => {
   const dir = configDir(process.env)
+  const now = Date.now()
   const cfg = readConfig({ dir, sessionId: input.session_id, readFile: readFileSync })
-  const { gauges, blind, reason } = await getGauges({ dir, now: Date.now() })
-  const { action, text } = decideForHook({ input, cfg, gauges, blind, reason })
+  const { gauges, blind, reason } = await getGauges({ dir, now })
+  const { action, text } = decideForHook({ input, cfg, gauges, blind, reason, now })
   if (action === 'deny') return denyOutput(input.hook_event_name, text)
   if (action === 'context') return contextOutput(input.hook_event_name, text)
   return allowOutput()

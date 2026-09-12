@@ -31,6 +31,17 @@ test('a blind guard never denies even in enforce mode', () => {
   assert.equal(r.action, 'allow')
 })
 
+test('a stale 100% reading past its own resetsAt is not enforced, once decideForHook is given the real now', () => {
+  const gaugesPastReset = {
+    five_hour: { percent: 100, resetsAt: '2026-09-11T11:00:00Z' }, seven_day: null, extra_usage: null, scoped: [],
+  }
+  const now = Date.parse('2026-09-11T12:00:00Z') // an hour after the gauge's own reset
+  const r = decideForHook({
+    input: { hook_event_name: 'PreToolUse', tool_name: 'Bash' }, cfg, gauges: gaugesPastReset, blind: false, now,
+  })
+  assert.equal(r.action, 'allow', 'a denial must never rest on a reading known to be invalid past its reset')
+})
+
 test('at 100% in enforce mode, the budget CLI escapes the ceiling while an unrelated Bash call is still denied', () => {
   const budgetInput = {
     hook_event_name: 'PreToolUse',
