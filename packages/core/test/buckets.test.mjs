@@ -127,6 +127,37 @@ test('with modelId absent (null), every display-name-based behavior is unchanged
   assert.equal(switchingHelps(scoped, 'affable-5').helps, false)
 })
 
+test('a bucket identified by id alone (no display_name) is reachable and matches', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-fable-5-1' } } },
+  ] })
+  assert.equal(scoped[0].model, null)
+  assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, true)
+})
+
+test('a bucket identified by id alone, for a different model, is false and names the id — not "every model"', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-fable-5-1' } } },
+  ] })
+  const r = switchingHelps(scoped, 'claude-opus-5')
+  assert.equal(r.helps, false)
+  assert.match(r.reason, /claude-fable-5-1/)
+  assert.doesNotMatch(r.reason, /every model/i)
+})
+
+test('a truly shared bucket (no model, no modelId) still says every model draws on', () => {
+  const shared = normaliseLimits({ limits: [
+    { kind: 'weekly_all', group: 'weekly', percent: 88, is_active: true, scope: null },
+  ] })
+  assert.equal(shared[0].model, null)
+  assert.equal(shared[0].modelId, null)
+  const r = switchingHelps(shared, 'claude-opus-5')
+  assert.equal(r.helps, false)
+  assert.match(r.reason, /every model/i)
+})
+
 test('a name that merely contains the bucket model as a substring does not match', () => {
   const scoped = normaliseLimits({ limits: [
     { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,

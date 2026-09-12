@@ -55,16 +55,24 @@ export function switchingHelps(buckets, currentModel) {
   // Switching helps only if EVERY bucket at the maximum is scoped to the model in use.
   // If any shared bucket, or one scoped to another model, is equally exhausted, then
   // switching moves you off one ceiling straight onto another.
-  const allOurs = atMax.every((b) => b.model && sameModel(b, currentModel))
+  //
+  // No `b.model &&` / `!b.model ||` guard here: sameModel() already decides correctly on
+  // its own, including when `model` (display_name) is null but `modelId` is present. Gating
+  // on `b.model` first made a bucket identifiable only by id unreachable — it always looked
+  // shared, which is not just a wrong answer but a false user-facing claim.
+  const allOurs = atMax.every((b) => sameModel(b, currentModel))
   if (!allOurs) {
-    const blocker = atMax.find((b) => !b.model || !sameModel(b, currentModel))
+    const blocker = atMax.find((b) => !sameModel(b, currentModel))
+    // A bucket is model-scoped if EITHER identifying field is present; prefer the
+    // human-readable display_name for the message, falling back to the id.
+    const label = blocker.model ?? blocker.modelId
     return { helps: false,
-      reason: blocker.model
-        ? `The binding limit is scoped to ${blocker.model}, not the model in use. Switching would not change it.`
+      reason: label
+        ? `The binding limit is scoped to ${label}, not the model in use. Switching would not change it.`
         : `The binding limit is ${blocker.kind} at ${Math.round(max)}%, which every model draws on. Switching models would not change it.` }
   }
   return { helps: true,
-    reason: `The binding limit is ${atMax[0].model}'s own weekly allowance at ${Math.round(max)}%. Another model draws on a different allowance, so switching would help right now.` }
+    reason: `The binding limit is ${atMax[0].model ?? atMax[0].modelId}'s own weekly allowance at ${Math.round(max)}%. Another model draws on a different allowance, so switching would help right now.` }
 }
 
 /**
