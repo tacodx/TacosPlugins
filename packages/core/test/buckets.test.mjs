@@ -76,3 +76,49 @@ test('model matching is case-insensitive and tolerates the api id form', () => {
   assert.equal(switchingHelps(scoped, 'fable').helps, true)
   assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, true)
 })
+
+test('a name that merely contains the bucket model as a substring does not match', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  assert.equal(switchingHelps(scoped, 'affable-5').helps, false)
+  assert.equal(switchingHelps(scoped, 'unfabled-model-x').helps, false)
+})
+
+test('a multi-word bucket model matches an api id carrying every token', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Claude Opus' } } },
+  ] })
+  assert.equal(switchingHelps(scoped, 'claude-opus-5').helps, true)
+})
+
+test('two model-scoped buckets tied at the maximum give the same answer regardless of array order', () => {
+  const opusBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: true,
+    scope: { model: { display_name: 'Opus' } } }
+  const fableBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: false,
+    scope: { model: { display_name: 'Fable' } } }
+
+  const forward = switchingHelps(normaliseLimits({ limits: [opusBucket, fableBucket] }), 'Fable')
+  const reversed = switchingHelps(normaliseLimits({ limits: [fableBucket, opusBucket] }), 'Fable')
+  assert.equal(forward.helps, false)
+  assert.equal(reversed.helps, false)
+})
+
+test('a shared bucket tied at the maximum with a current-model bucket means switching does not help', () => {
+  const shared = { kind: 'weekly_all', group: 'weekly', percent: 60, is_active: true, scope: null }
+  const scoped = { kind: 'weekly_scoped', group: 'weekly', percent: 60, is_active: false,
+    scope: { model: { display_name: 'Fable' } } }
+  const r = switchingHelps(normaliseLimits({ limits: [shared, scoped] }), 'Fable')
+  assert.equal(r.helps, false)
+})
+
+test('a non-finite percent is dropped rather than winning binding()', () => {
+  const withInfinity = normaliseLimits({ limits: [
+    { kind: 'broken', group: 'weekly', percent: Infinity, is_active: true, scope: null },
+    { kind: 'weekly_all', group: 'weekly', percent: 40, is_active: true, scope: null },
+  ] })
+  assert.equal(withInfinity.length, 1)
+  assert.equal(withInfinity[0].kind, 'weekly_all')
+})
