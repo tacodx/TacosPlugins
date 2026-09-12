@@ -1,0 +1,67 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the declared floor; 24 catches breakage from a newer runtime
+        # before a contributor hits it locally.
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No install step, deliberately: the project has zero runtime and dev
+      # dependencies, and a plugin is installed by Claude Code as a plain
+      # directory with nothing to build. If `npm ci` ever becomes necessary
+      # here, that is a signal the zero-dependency rule has been broken.
+      - name: Tests run with no install step
+        run: npm test
+
+      # `plugins/*/lib/` is vendored from packages/core and tracked in git,
+      # because Claude Code runs a plugin straight from the cloned directory
+      # with no build step. Shipping a stale copy is how the first plugin was
+      # published in a state where every hook crashed, so the build fails if
+      # regenerating produces any diff at all.
+      - name: Vendored lib/ is in sync with packages/core
+        run: |
+          node scripts/release.mjs
+          if ! git diff --quiet; then
+            echo "::error::plugins/*/lib/ is stale. Run 'node scripts/release.mjs' and commit the result."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+      # The published plugin must run from exactly what git carries, which is
+      # not the same as running from a working tree that may hold untracked
+      # files. This reproduces what a user actually clones.
+      - name: A fresh checkout can run the hooks
+        run: |
+          mkdir -p /tmp/consumer /tmp/cfg
+          git archive HEAD | tar -x -C /tmp/consumer
+          cd /tmp/consumer
+          for hook in plugins/usage-guard/hooks/guard.mjs plugins/model-advisor/hooks/advisor.mjs; do
+            echo '{"hook_event_name":"UserPromptSubmit","session_id":"ci","cwd":"/tmp"}' \
+              | CLAUDE_CONFIG_DIR=/tmp/cfg node "$hook"
+            status=$?
+            # With no credentials both plugins are blind and must allow silently.
+            # Any non-zero exit here is a real failure; exit 2 specifically would
+            # mean a hook denies a tool call on a machine with no config at all.
+            if [ $status -ne 0 ]; then
+              echo "::error::$hook exited $status on a bare checkout (expected 0)"
+              exit 1
+            fi
+          done
