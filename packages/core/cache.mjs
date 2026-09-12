@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 /** Returns {data, fresh} or null. Never throws. */
 export function readCache(path, { now, ttlMs, maxStaleMs, readFile = readFileSync }) {
@@ -14,12 +15,15 @@ export function readCache(path, { now, ttlMs, maxStaleMs, readFile = readFileSyn
 /** Never throws — a cache we cannot persist is a slow cache, not a broken session. */
 export function writeCache(path, data, {
   now, writeFile = writeFileSync, mkdir = mkdirSync,
-  rename = renameSync, remove = unlinkSync,
+  rename = renameSync, remove = unlinkSync, uuid = randomUUID,
 } = {}) {
-  const tmp = `${path}.${process.pid}.tmp`
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
   try {
     mkdir(dirname(path), { recursive: true })
-    writeFile(tmp, JSON.stringify({ fetchedAt: now, data }), { mode: 0o600 })
+    // 'wx' guarantees this call always creates the file, so `mode` is always applied —
+    // reusing an existing (possibly world-readable) leftover tmp file would silently
+    // keep its old mode. Same rationale as auth.mjs's writeBackCredentials.
+    writeFile(tmp, JSON.stringify({ fetchedAt: now, data }), { mode: 0o600, flag: 'wx' })
     rename(tmp, path)
   } catch { // fail-open: a cache we cannot persist is a slow cache, not a broken session
     // a failed rename leaves the tmp file behind; each hook run is a new pid, so

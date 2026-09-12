@@ -77,16 +77,33 @@ test('writeCache writes fetchedAt and data, then renames tmp over path', () => {
 
 test('writeCache cleans up tmp on rename failure', () => {
   let removed = null
+  let writtenTmp = null
   writeCache('/c', { a: 1 }, {
     now: 1,
     mkdir: () => {},
-    writeFile: () => {},
+    writeFile: (p) => { writtenTmp = p },
     rename: () => { throw new Error('readonly') },
     remove: (path) => { removed = path },
   })
   // Assert AFTER the call returns. An assertion inside the remove mock would be
   // swallowed by writeCache's own fail-open catch.
-  assert.equal(removed, `/c.${process.pid}.tmp`, 'tmp file path must be cleaned up on rename failure')
+  assert.equal(removed, writtenTmp, 'the exact tmp file that was written must be the one cleaned up')
+})
+
+test('writeCache uses a freshly-named tmp file (uuid + wx), same hardening as auth.mjs and session.mjs', () => {
+  let writeArgs, renameArgs
+  writeCache('/c/usage.json', { a: 1 }, {
+    now: 1,
+    mkdir: () => {},
+    writeFile: (p, _b, opts) => { writeArgs = { path: p, opts } },
+    rename: (from, to) => { renameArgs = { from, to } },
+    uuid: () => 'FIXED',
+  })
+  assert.equal(writeArgs.path, '/c/usage.json.' + process.pid + '.FIXED.tmp')
+  assert.equal(writeArgs.opts.mode, 0o600)
+  assert.equal(writeArgs.opts.flag, 'wx', 'wx guarantees mode is applied on every write, never reusing a stale tmp file')
+  assert.equal(renameArgs.from, writeArgs.path)
+  assert.equal(renameArgs.to, '/c/usage.json')
 })
 
 test('uncontended lock acquire calls removeLock after fn resolves', async () => {
