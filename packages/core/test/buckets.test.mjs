@@ -95,9 +95,14 @@ test('a multi-word bucket model matches an api id carrying every token', () => {
 })
 
 test('two model-scoped buckets tied at the maximum give the same answer regardless of array order', () => {
+  // is_active is deliberately IDENTICAL on both buckets. binding()'s active-tiebreak
+  // would otherwise resolve the tie by itself regardless of array order, which made an
+  // earlier version of this test pass even against the pre-fix, order-dependent
+  // implementation — the tie has to fall through to input order for this test to mean
+  // anything.
   const opusBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: true,
     scope: { model: { display_name: 'Opus' } } }
-  const fableBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: false,
+  const fableBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: true,
     scope: { model: { display_name: 'Fable' } } }
 
   const forward = switchingHelps(normaliseLimits({ limits: [opusBucket, fableBucket] }), 'Fable')
@@ -112,6 +117,42 @@ test('a shared bucket tied at the maximum with a current-model bucket means swit
     scope: { model: { display_name: 'Fable' } } }
   const r = switchingHelps(normaliseLimits({ limits: [shared, scoped] }), 'Fable')
   assert.equal(r.helps, false)
+})
+
+test('a versioned bucket name does not match a different point release by token subset (version confusion)', () => {
+  const opus4 = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Opus 4' } } },
+  ] })
+  assert.equal(switchingHelps(opus4, 'claude-opus-4-5-20250929').helps, false)
+
+  const haiku3 = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Claude 3 Haiku' } } },
+  ] })
+  assert.equal(switchingHelps(haiku3, 'claude-3-5-haiku-20241022').helps, false)
+})
+
+test('a versioned bucket name still matches an exactly equal token sequence', () => {
+  const opus4 = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Opus 4' } } },
+  ] })
+  assert.equal(switchingHelps(opus4, 'opus-4').helps, true)
+})
+
+test('non-versioned bucket names are unaffected by the version-digit exact-match rule', () => {
+  const fable = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  assert.equal(switchingHelps(fable, 'claude-fable-5-1').helps, true)
+
+  const claudeOpus = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Claude Opus' } } },
+  ] })
+  assert.equal(switchingHelps(claudeOpus, 'claude-opus-5').helps, true)
 })
 
 test('a non-finite percent is dropped rather than winning binding()', () => {

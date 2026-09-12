@@ -71,12 +71,25 @@ export function switchingHelps(buckets, currentModel) {
  * A substring test matched both of those and produced a confident, wrong "switching helps".
  * Compare on token boundaries instead, and require every token of the bucket's name to be
  * present. A name made only of digits identifies nothing, so it never matches.
+ *
+ * A bucket name carrying a version digit ("Opus 4") is a SEPARATE case: token-subset
+ * matching let it match "claude-opus-4-5-20250929" too, because that id's tokens are a
+ * superset of the bucket's. There is no safe way to tell "Opus 4" apart from "Opus 4.5"
+ * or any other point release by subset containment, so once any token is numeric we
+ * require the tokens to match EXACTLY (same length, same order) instead of by subset.
+ * That yields a false NEGATIVE on a real match we can't verify — silence, not a wrong
+ * "switching helps" — which is the failure direction this module is required to prefer.
+ * Do not "fix" this back to subset matching; that is exactly the bug being avoided.
  */
 function sameModel(bucketModel, current) {
   if (typeof bucketModel !== 'string' || typeof current !== 'string') return false
   const tokens = (v) => v.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
   const want = tokens(bucketModel)
   if (want.length === 0 || want.every((t) => /^\d+$/.test(t))) return false
-  const have = new Set(tokens(current))
-  return want.every((t) => have.has(t))
+  const have = tokens(current)
+  if (want.some((t) => /\d/.test(t))) {
+    return have.length === want.length && want.every((t, i) => have[i] === t)
+  }
+  const haveSet = new Set(have)
+  return want.every((t) => haveSet.has(t))
 }
