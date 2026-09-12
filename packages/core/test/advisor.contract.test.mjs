@@ -19,22 +19,21 @@ const scoped = normaliseLimits({ limits: [
   { kind: 'weekly_scoped', group: 'weekly', percent: 90, is_active: true,
     scope: { model: { display_name: 'Fable' } } },
 ] })
-const input = { hook_event_name: 'UserPromptSubmit', session_id: 's' }
 
 test('silent when a shared bucket binds, however high', () => {
-  assert.equal(adviseForHook({ input, buckets: shared, model: 'claude-fable-5-1' }).action, 'allow')
+  assert.equal(adviseForHook({ buckets: shared, model: 'claude-fable-5-1' }).action, 'allow')
 })
 
 test('silent when the model is unknown', () => {
-  assert.equal(adviseForHook({ input, buckets: scoped, model: null }).action, 'allow')
+  assert.equal(adviseForHook({ buckets: scoped, model: null }).action, 'allow')
 })
 
 test('silent when there are no buckets', () => {
-  assert.equal(adviseForHook({ input, buckets: [], model: 'claude-opus-5' }).action, 'allow')
+  assert.equal(adviseForHook({ buckets: [], model: 'claude-opus-5' }).action, 'allow')
 })
 
 test('speaks only when the binding bucket is scoped to the model in use', () => {
-  const r = adviseForHook({ input, buckets: scoped, model: 'claude-fable-5-1' })
+  const r = adviseForHook({ buckets: scoped, model: 'claude-fable-5-1' })
   assert.equal(r.action, 'context')
   assert.match(r.text, /Fable/)
   assert.match(r.text, /90/)
@@ -43,14 +42,14 @@ test('speaks only when the binding bucket is scoped to the model in use', () => 
 test('never emits a denial in any combination', () => {
   for (const buckets of [shared, scoped, []]) {
     for (const model of ['claude-fable-5-1', 'claude-opus-5', null]) {
-      const r = adviseForHook({ input, buckets, model })
+      const r = adviseForHook({ buckets, model })
       assert.notEqual(r.action, 'deny')
     }
   }
 })
 
 test('never claims one model costs more than another', () => {
-  const r = adviseForHook({ input, buckets: scoped, model: 'claude-fable-5-1' })
+  const r = adviseForHook({ buckets: scoped, model: 'claude-fable-5-1' })
   assert.doesNotMatch(r.text, /cheap|expensive|costs? (more|less)|save (money|tokens)/i)
 })
 

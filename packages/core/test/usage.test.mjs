@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { normalise, fetchUsage, getGauges, USAGE_URL, rawCachePath } from '../usage.mjs'
+import { writeCache } from '../cache.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const fixture = (n) => JSON.parse(readFileSync(join(HERE, 'fixtures', `${n}.json`), 'utf8'))
@@ -176,6 +177,39 @@ test('getGauges without wantRaw has no raw key, even after a live fetch populate
   try {
     const result = await getGauges({ dir, now, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
     assert.equal(Object.hasOwn(result, 'raw'), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// getGauges used to call readRaw() eagerly as an argument at every call site, so the
+// raw-cache file was opened and read even when wantRaw was false — attach() discarded
+// the value, but the read itself had already happened. Confirmed by strace against the
+// real process: usage-guard's PreToolUse (which never passes wantRaw) was opening and
+// discarding usage-raw.json on every single tool call.
+test('a plain (non-wantRaw) call never reads the raw-cache file at all — readRaw is lazy', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  try {
+    // A fresh gauge-cache hit is exactly the branch that used to call readRaw()
+    // unconditionally, so seed both caches fresh and take that path.
+    writeCache(join(dir, 'tacos', 'usage-cache.json'),
+      { five_hour: null, seven_day: null, extra_usage: null, scoped: [] }, { now })
+    writeCache(rawCachePath(dir), { limits: [] }, { now })
+
+    let rawFileRead = false
+    const spyReadFile = (path, ...rest) => {
+      if (path === rawCachePath(dir)) rawFileRead = true
+      return readFileSync(path, ...rest)
+    }
+
+    const result = await getGauges({ dir, now, readFile: spyReadFile })
+
+    // Assert AFTER the call returns, not inside the injected spy — mirrors the
+    // convention throughout this codebase (see cache.test.mjs) even though nothing
+    // here would swallow it; consistency is the point.
+    assert.equal(Object.hasOwn(result, 'raw'), false)
+    assert.equal(rawFileRead, false, 'the raw cache file must never be opened when wantRaw is false')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

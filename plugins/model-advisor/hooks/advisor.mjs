@@ -9,8 +9,15 @@ const { configDir } = await load('config.mjs')
 const { getGauges } = await load('usage.mjs')
 const { run, allowOutput, contextOutput } = await load('hookio.mjs')
 
-/** Pure. This plugin informs; it can never deny. */
-export function adviseForHook({ input, buckets, model }) {
+/**
+ * Pure. This plugin informs; it can never deny.
+ *
+ * No `input` parameter: the hook payload has nothing this function needs — the caller
+ * below already extracts `transcript_path` (to resolve `model`) and `hook_event_name`
+ * (to build the eventual hookSpecificOutput) itself. An earlier version threaded `input`
+ * through here unused, symmetry with no purpose.
+ */
+export function adviseForHook({ buckets, model }) {
   const { helps, reason } = switchingHelps(buckets, model)
   if (!helps) return { action: 'allow', text: null }
   return { action: 'context', text: `Model advice: ${reason}` }
@@ -26,6 +33,6 @@ if (isMain) run(async (input) => {
     transcriptPath: input.transcript_path,
     settingsPath: join(dir, 'settings.json'),
   })
-  const { action, text } = adviseForHook({ input, buckets, model })
+  const { action, text } = adviseForHook({ buckets, model })
   return action === 'context' ? contextOutput(input.hook_event_name, text) : allowOutput()
 })

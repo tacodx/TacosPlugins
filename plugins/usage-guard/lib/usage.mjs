@@ -117,6 +117,7 @@ export async function fetchUsage({ token, fetchImpl = fetch, timeoutMs = 3000 })
  */
 export async function getGauges({
   dir, now, fetchImpl = fetch, ttlMs = 60_000, maxStaleMs = 900_000, timeoutMs = 3000, wantRaw = false,
+  readFile = readFileSync, // test seam for the raw-cache read only; see readRaw below
 }) {
   const cachePath = join(dir, 'tacos', 'usage-cache.json')
   const failurePath = failureCachePath(dir)
@@ -129,29 +130,35 @@ export async function getGauges({
   // themselves tolerate. null is exactly what a caller with no buckets looks like, which
   // is the correct degradation (see the brief: "the advisor treats that as no buckets").
   const readRaw = () => {
-    const entry = readCache(rawPath, { now, ttlMs, maxStaleMs })
+    const entry = readCache(rawPath, { now, ttlMs, maxStaleMs, readFile })
     return entry?.fresh ? entry.data : null
   }
   // Only ever adds a key; never removes or renames one, so every branch below keeps its
-  // exact historical shape when wantRaw is false.
-  const attach = (result, raw) => (wantRaw ? { ...result, raw } : result)
+  // exact historical shape when wantRaw is false. `getRaw` is a THUNK, not a value: every
+  // call site below passes a function, not its result, so `readRaw()` (a filesystem read)
+  // only actually runs when `wantRaw` is true. It used to be called eagerly as an argument
+  // at every call site regardless of `wantRaw` — `attach` discarded the value when
+  // `!wantRaw`, but the read itself had already happened. Confirmed by strace:
+  // usage-guard's PreToolUse (which never passes wantRaw) was opening and discarding
+  // usage-raw.json on every single tool call.
+  const attach = (result, getRaw) => (wantRaw ? { ...result, raw: getRaw() } : result)
 
   const cached = readCache(cachePath, { now, ttlMs, maxStaleMs })
-  if (cached?.fresh) return attach({ gauges: cached.data, blind: false, reason: null, fresh: true, warning: null }, readRaw())
+  if (cached?.fresh) return attach({ gauges: cached.data, blind: false, reason: null, fresh: true, warning: null }, readRaw)
 
   // A recent failure is still backing off: skip credential read and network entirely,
   // and answer exactly as a fresh failure would (stale cache if any, else blind).
   const failure = activeFailure(failurePath, now)
   if (failure) {
-    if (cached) return attach({ gauges: cached.data, blind: false, reason: failure.reason, fresh: false, warning: null }, readRaw())
-    return attach({ gauges: null, blind: true, reason: failure.reason, fresh: false, warning: null }, null)
+    if (cached) return attach({ gauges: cached.data, blind: false, reason: failure.reason, fresh: false, warning: null }, readRaw)
+    return attach({ gauges: null, blind: true, reason: failure.reason, fresh: false, warning: null }, () => null)
   }
 
   const { token, error: authError } = await getAccessToken({ dir, now, fetchImpl })
   if (!token) {
     recordFailure(failurePath, now, authError)
-    if (cached) return attach({ gauges: cached.data, blind: false, reason: authError, fresh: false, warning: null }, readRaw())
-    return attach({ gauges: null, blind: true, reason: authError, fresh: false, warning: null }, null)
+    if (cached) return attach({ gauges: cached.data, blind: false, reason: authError, fresh: false, warning: null }, readRaw)
+    return attach({ gauges: null, blind: true, reason: authError, fresh: false, warning: null }, () => null)
   }
   // A token was obtained even when authError is 'refresh-not-persisted' (the refreshed
   // access token is still good to use) — carry that warning forward regardless of how
@@ -165,8 +172,8 @@ export async function getGauges({
 
   if (result.error) {
     recordFailure(failurePath, now, result.error)
-    if (cached) return attach({ gauges: cached.data, blind: false, reason: result.error, fresh: false, warning }, readRaw())
-    return attach({ gauges: null, blind: true, reason: result.error, fresh: false, warning }, null)
+    if (cached) return attach({ gauges: cached.data, blind: false, reason: result.error, fresh: false, warning }, readRaw)
+    return attach({ gauges: null, blind: true, reason: result.error, fresh: false, warning }, () => null)
   }
   const gauges = normalise(result.raw)
   writeCache(cachePath, gauges, { now })
@@ -181,5 +188,5 @@ export async function getGauges({
   // fetch the first time either plugin needs raw data. See
   // usage.test.mjs: "a plain getGauges() fetch feeds a later wantRaw:true call".
   writeCache(rawPath, result.raw, { now })
-  return attach({ gauges, blind: false, reason: null, fresh: true, warning }, result.raw)
+  return attach({ gauges, blind: false, reason: null, fresh: true, warning }, () => result.raw)
 }
