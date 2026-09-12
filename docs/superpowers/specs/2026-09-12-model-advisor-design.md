@@ -83,9 +83,12 @@ Two sources, in order:
 
 If neither yields a model, the plugin is **blind on model** and stays silent. It never guesses.
 
-`effort` *is* in the hook payload and is displayed, but it does not drive any advice — effort
-is a quality lever, and this plugin does not trade quality for budget any more than
-`usage-guard` does.
+`effort` *is* in the hook payload, but it is **not displayed anywhere in the shipped plugin**
+and does not drive any advice. `/limits` is a slash command, so no hook payload reaches it and
+it cannot know the effort level; printing a permanent "could not be determined" placeholder on
+every invocation reads as a broken tool rather than a limitation of the surface, so the line
+was removed. Effort is a quality lever regardless, and this plugin does not trade quality for
+budget any more than `usage-guard` does.
 
 ## 6. Architecture
 
@@ -131,8 +134,12 @@ plugin earns its place by speaking rarely.
 
 **`/limits`** (`commands/limits.md`, frontmatter `name: limits`, so both
 `/model-advisor:limits` and bare `/limits` resolve) — prints the full bucket map: every
-bucket, its percentage, its scope, which one binds, the current model and effort, and a plain
-sentence answering whether switching would help.
+bucket, its percentage, its scope, which one binds, the current model, and a plain sentence
+answering whether switching would help. It does **not** print effort — see §5.
+
+A bucket scoped to a model other than the one in use is listed but never marked as binding,
+because it cannot constrain the current session. The bucket named in the sentence and the
+bucket carrying the marker are always the same one; they come from a single decision.
 
 **No `PreToolUse` hook.** This plugin never gates a tool call. Registering there would add a
 process spawn per tool call for no benefit.
