@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +38,20 @@ test('names the current model and effort', () => {
 test('says plainly when the model is unknown', () => {
   const out = renderBuckets({ buckets, model: null, effort: null, helps: false, reason: 'nope' })
   assert.match(out, /could not be determined/i)
+})
+
+test('omits the effort line entirely when effort is unknown, rather than a permanent placeholder', () => {
+  // Unlike the model, a caller that has no source for effort at all (the /limits CLI)
+  // would print a "could not be determined" placeholder on every single invocation —
+  // that reads as a defect in the tool, not a real limitation being disclosed. So this
+  // is a real behavioral difference from the model line above, not an oversight.
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: null, helps: false, reason: 'nope' })
+  assert.doesNotMatch(out, /effort/i)
+})
+
+test('prints the effort line when effort is known', () => {
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max', helps: false, reason: 'nope' })
+  assert.match(out, /effort:\s*max/i)
 })
 
 test('renders nothing misleading with no buckets', () => {
@@ -102,6 +116,39 @@ test('the real /limits process renders a real bucket map from a fabricated cache
     // maximum, so switching genuinely would help right now — the real switchingHelps
     // codepath, not a fabricated one.
     assert.match(out, /would help/i)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the real /limits process resolves the model from the session transcript over settings.json', () => {
+  // Proves findSessionTranscript's wiring actually wins, not just that it exists: the
+  // transcript and settings.json deliberately disagree, and the transcript must be the
+  // one that shows up in the output.
+  const dir = mkdtempSync(join(tmpdir(), 'model-advisor-limits-test-'))
+  try {
+    const now = Date.now()
+    writeCache(join(dir, 'tacos', 'usage-cache.json'),
+      { five_hour: null, seven_day: null, extra_usage: null, scoped: [] }, { now })
+    writeCache(rawCachePath(dir), { limits: [
+      { kind: 'weekly_all', group: 'weekly', percent: 10, is_active: true, resets_at: 'W', scope: null },
+    ] }, { now })
+    // settings.json names a model the transcript must NOT win with.
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ model: 'claude-opus-5' }))
+    // The session transcript, found by session id under projects/<anything>/, names a
+    // different model — this is the one that must appear in the output.
+    const projectDir = join(dir, 'projects', 'some-project-hash')
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, 's1.jsonl'),
+      `${JSON.stringify({ message: { model: 'claude-sonnet-5' } })}\n`)
+
+    const out = execFileSync('node', [LIMITS, 's1'], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+    })
+
+    assert.match(out, /claude-sonnet-5/, 'the transcript-named model must appear')
+    assert.doesNotMatch(out, /claude-opus-5/, 'the settings.json model must NOT win when a transcript is found')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

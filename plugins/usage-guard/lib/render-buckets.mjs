@@ -9,9 +9,17 @@ import { binding } from './buckets.mjs'
  * ONLY the reason sentence, no bar, no bucket line, no `%` anywhere — a percentage would
  * imply knowledge the tool does not possess (see buckets.mjs's own no-buckets reason).
  *
- * Never guesses the model or effort: a null value for either prints "could not be
- * determined" rather than being silently omitted, so the user can tell "we checked and
- * don't know" apart from "this line doesn't exist".
+ * Never guesses the model: a null value prints "could not be determined" rather than
+ * being silently omitted, so the user can tell "we checked and don't know" apart from
+ * "this line doesn't exist" — the model genuinely varies call to call, so a reader needs
+ * to know when the advice below is unanchored.
+ *
+ * `effort`, by contrast, is omitted entirely when null rather than given the same
+ * placeholder treatment. Unlike the model, a caller with no way to learn effort (the
+ * `/limits` CLI, which never receives the hook payload effort lives in) would print that
+ * placeholder on literally every invocation — a permanently-unknowable field printed every
+ * time reads as a defect in this tool, not a limitation of the surface it's running on.
+ * A caller that DOES know effort still gets it printed normally.
  *
  * Never states or implies a cost/cheapness comparison between models — it prints `reason`
  * (produced by switchingHelps) verbatim rather than composing its own sentence, so any
@@ -21,7 +29,7 @@ import { binding } from './buckets.mjs'
 export function renderBuckets({ buckets, model, effort, helps, reason }) {
   const lines = ['model-advisor: /limits', '']
   lines.push(`  model:  ${model ?? 'could not be determined'}`)
-  lines.push(`  effort: ${effort ?? 'could not be determined'}`)
+  if (effort != null) lines.push(`  effort: ${effort}`)
   lines.push('')
 
   const list = Array.isArray(buckets) ? buckets : []

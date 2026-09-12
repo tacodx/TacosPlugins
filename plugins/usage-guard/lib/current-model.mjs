@@ -1,4 +1,5 @@
-import { readFileSync, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+import { readFileSync, readdirSync, openSync, fstatSync, readSync, closeSync } from 'node:fs'
+import { join } from 'node:path'
 
 /** Pure. Last row wins; `<synthetic>` is not a real model. */
 export function modelFromTranscript(text) {
@@ -19,6 +20,43 @@ export function stripSuffix(model) {
   if (typeof model !== 'string') return null
   const i = model.indexOf('[')
   return i === -1 ? model : model.slice(0, i)
+}
+
+/**
+ * Finds a session's transcript by searching one level under `<configDir>/projects/` for a
+ * `<sessionId>.jsonl` file. Exists for callers that only ever receive a session id, never a
+ * `transcript_path` — a plain slash-command CLI invoked as a shell substitution (unlike a
+ * hook, which gets `transcript_path` handed to it directly on stdin) has no other way to
+ * find the transcript at all.
+ *
+ * Deliberately conservative, in the same direction every guess-avoidance rule in this
+ * plugin leans: a path is returned ONLY when exactly one project directory contains a
+ * session file with this name. Zero matches (nothing found yet, e.g. session hasn't
+ * written a transcript) and more than one match (a session id colliding across projects,
+ * which should not happen but is not a case worth guessing through) both return null, and
+ * the caller's existing settings.json fallback applies exactly as it would for a hook that
+ * received no transcript_path at all — this function never invents a preference between
+ * ambiguous candidates.
+ *
+ * Never throws: a missing or unreadable `projects` directory, or a single unreadable
+ * project subdirectory, is treated as "no match found there" rather than propagating —
+ * fail-open to the settings fallback, not to a crash.
+ */
+export function findSessionTranscript(configDir, sessionId, { readdir = readdirSync } = {}) {
+  if (typeof configDir !== 'string' || typeof sessionId !== 'string' || sessionId === '') return null
+  const projectsDir = join(configDir, 'projects')
+  let projectNames
+  try { projectNames = readdir(projectsDir) }
+  catch { return null } // no projects directory yet, or it cannot be read — nothing to search
+  const wanted = `${sessionId}.jsonl`
+  const matches = []
+  for (const name of projectNames) {
+    let files
+    try { files = readdir(join(projectsDir, name)) }
+    catch { continue } // this one project directory is unreadable; the others may still resolve
+    if (files.includes(wanted)) matches.push(join(projectsDir, name, wanted))
+  }
+  return matches.length === 1 ? matches[0] : null
 }
 
 // Windows tried, smallest first. A JSONL transcript's most recent model is almost always

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { modelFromTranscript, stripSuffix, currentModel, readTail } from '../current-model.mjs'
+import { modelFromTranscript, stripSuffix, currentModel, readTail, findSessionTranscript } from '../current-model.mjs'
 
 const row = (model, ts) => JSON.stringify({ message: { model }, timestamp: ts })
 const WINDOW_1 = 64 * 1024
@@ -219,4 +219,62 @@ test('a transcript whose window starts mid-line still yields the correct most re
     readTail: (path) => readTail(path, bytes, io),
   })
   assert.equal(m, 'claude-opus-5')
+})
+
+// --- findSessionTranscript ---
+//
+// This is the only way `/limits` (a plain shell substitution that receives just a session
+// id, never transcript_path) can recover transcript access at all. The directory reader is
+// injected and never asserted inside — each mock records nothing, just returns canned
+// listings or throws, and assertions run on findSessionTranscript's return value afterward.
+
+test('exactly one project directory containing the session file resolves to its path', () => {
+  const readdir = (p) => {
+    if (p === '/cfg/projects') return ['proj-a']
+    if (p === '/cfg/projects/proj-a') return ['s1.jsonl', 'other.jsonl']
+    throw new Error(`unexpected path ${p}`)
+  }
+  const found = findSessionTranscript('/cfg', 's1', { readdir })
+  assert.equal(found, '/cfg/projects/proj-a/s1.jsonl')
+})
+
+test('zero matches falls back to null (caller then uses settings)', () => {
+  const readdir = (p) => {
+    if (p === '/cfg/projects') return ['proj-a']
+    if (p === '/cfg/projects/proj-a') return ['other.jsonl']
+    throw new Error(`unexpected path ${p}`)
+  }
+  assert.equal(findSessionTranscript('/cfg', 's1', { readdir }), null)
+})
+
+test('two matches across different project directories falls back to null rather than picking one', () => {
+  const readdir = (p) => {
+    if (p === '/cfg/projects') return ['proj-a', 'proj-b']
+    if (p === '/cfg/projects/proj-a') return ['s1.jsonl']
+    if (p === '/cfg/projects/proj-b') return ['s1.jsonl']
+    throw new Error(`unexpected path ${p}`)
+  }
+  assert.equal(findSessionTranscript('/cfg', 's1', { readdir }), null)
+})
+
+test('an unreadable projects directory falls back to null rather than throwing', () => {
+  const readdir = () => { throw new Error('EACCES') }
+  assert.doesNotThrow(() => findSessionTranscript('/cfg', 's1', { readdir }))
+  assert.equal(findSessionTranscript('/cfg', 's1', { readdir }), null)
+})
+
+test('one unreadable project directory does not stop the search of the others', () => {
+  const readdir = (p) => {
+    if (p === '/cfg/projects') return ['broken', 'proj-a']
+    if (p === '/cfg/projects/broken') throw new Error('EACCES')
+    if (p === '/cfg/projects/proj-a') return ['s1.jsonl']
+    throw new Error(`unexpected path ${p}`)
+  }
+  assert.equal(findSessionTranscript('/cfg', 's1', { readdir }), '/cfg/projects/proj-a/s1.jsonl')
+})
+
+test('missing configDir or sessionId never throws and yields null', () => {
+  assert.equal(findSessionTranscript(undefined, 's1'), null)
+  assert.equal(findSessionTranscript('/cfg', undefined), null)
+  assert.equal(findSessionTranscript('/cfg', ''), null)
 })
