@@ -28,9 +28,12 @@ test('strips a context suffix', () => {
 })
 
 test('falls back to settings when the transcript yields nothing', () => {
+  // Transcript content is fed via readTail, never readFile — readFile governs only the
+  // settings.json read below.
   const m = currentModel({
     transcriptPath: '/t', settingsPath: '/s',
-    readFile: (p) => (p === '/t' ? '' : JSON.stringify({ model: 'claude-opus-5[1m]' })),
+    readTail: () => ({ text: '', reachedStart: true }),
+    readFile: () => JSON.stringify({ model: 'claude-opus-5[1m]' }),
   })
   assert.equal(m, 'claude-opus-5')
 })
@@ -38,7 +41,8 @@ test('falls back to settings when the transcript yields nothing', () => {
 test('prefers the transcript over settings', () => {
   const m = currentModel({
     transcriptPath: '/t', settingsPath: '/s',
-    readFile: (p) => (p === '/t' ? row('claude-sonnet-5', '1') : JSON.stringify({ model: 'claude-opus-5' })),
+    readTail: () => ({ text: row('claude-sonnet-5', '1'), reachedStart: true }),
+    readFile: () => JSON.stringify({ model: 'claude-opus-5' }),
   })
   assert.equal(m, 'claude-sonnet-5')
 })
@@ -46,6 +50,7 @@ test('prefers the transcript over settings', () => {
 test('never throws; returns null when everything fails', () => {
   const m = currentModel({
     transcriptPath: '/t', settingsPath: '/s',
+    readTail: () => { throw new Error('nope') },
     readFile: () => { throw new Error('nope') },
   })
   assert.equal(m, null)
@@ -54,9 +59,56 @@ test('never throws; returns null when everything fails', () => {
 test('returns null, not a guessed default, when there is no settings path to fall back to', () => {
   const m = currentModel({
     transcriptPath: '/t', settingsPath: undefined,
-    readFile: () => '',
+    readTail: () => ({ text: '', reachedStart: true }),
   })
   assert.equal(m, null)
+})
+
+test('currentModel never calls readFile with the transcript path — readFile governs settings.json only', () => {
+  // readFile and readTail are two separate seams with no interaction: passing readFile
+  // must have zero effect on how the transcript is read. Record every path readFile
+  // receives and assert afterward that the transcript path is never among them — this is
+  // the exact property whose absence let both real call sites (the hook and /limits)
+  // silently disable the windowed transcript read by passing readFile for settings.json.
+  //
+  // Deliberately supplies ONLY readFile, no readTail override, so the transcript falls
+  // through to whatever currentModel's actual default transcript-reading path is. That
+  // default is the real windowed readTail, which will genuinely try to open this
+  // nonexistent path and fail closed (ENOENT) — never touching readFile at all. This is
+  // the exact case the old conditional got wrong: with only readFile supplied, it swapped
+  // in a readFile-backed whole-file substitute instead of leaving readTail's real default
+  // in place, so a mutation restoring that conditional makes this test fail (verified
+  // below) precisely because it does NOT also inject readTail, unlike the test after it.
+  const readFileCalls = []
+  const readFile = (p) => {
+    readFileCalls.push(p)
+    return JSON.stringify({ model: 'claude-opus-5' })
+  }
+  const m = currentModel({
+    transcriptPath: '/nonexistent-transcript-path-for-current-model-test', settingsPath: '/s',
+    readFile,
+  })
+  assert.equal(m, 'claude-opus-5')
+  assert.deepEqual(readFileCalls, ['/s'])
+  assert.ok(!readFileCalls.includes('/nonexistent-transcript-path-for-current-model-test'),
+    'readFile must never be called with the transcript path')
+})
+
+test('supplying readFile has no effect on transcript reading — the windowed readTail is still used', () => {
+  // Pins the other half of the same property: readFile's mere presence must not disable
+  // or replace the windowed transcript read. readTail is injected here purely as a spy
+  // (recording the window size it was asked for) so this test can observe that it is
+  // still the transcript's actual read path even though readFile is also supplied.
+  const readTailCalls = []
+  const readFile = () => JSON.stringify({ model: 'claude-opus-5' }) // must never be reached for this transcript
+  const readTail = (path, bytes) => {
+    readTailCalls.push(bytes)
+    return { text: row('claude-sonnet-5', '1'), reachedStart: true }
+  }
+  const m = currentModel({ transcriptPath: '/t', settingsPath: '/s', readFile, readTail })
+  assert.equal(m, 'claude-sonnet-5')
+  assert.ok(readTailCalls.length > 0, 'readTail must be called for the transcript even when readFile is also supplied')
+  assert.deepEqual(readTailCalls, [WINDOW_1])
 })
 
 test('returns null, not an empty string, when the transcript model strips to nothing', () => {

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -26,7 +25,6 @@ if (isMain) run(async (input) => {
   const model = currentModel({
     transcriptPath: input.transcript_path,
     settingsPath: join(dir, 'settings.json'),
-    readFile: readFileSync,
   })
   const { action, text } = adviseForHook({ input, buckets, model })
   return action === 'context' ? contextOutput(input.hook_event_name, text) : allowOutput()

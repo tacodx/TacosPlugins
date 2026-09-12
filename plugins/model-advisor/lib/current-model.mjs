@@ -132,20 +132,27 @@ function modelFromTail(transcriptPath, readTailFn) {
 /**
  * Never throws. Returns null when the model cannot be determined — the caller stays silent.
  *
- * `readFile` and `readTail` are independent, optional overrides. A caller that supplies
- * only `readFile` (the shape this module originally took) still gets the transcript read
- * through it, wholesale, exactly as before — no caller that only injects `readFile` needs
- * to change. That whole-file read is wrapped as `{ text, reachedStart: true }` so it
- * matches the real `readTail`'s return shape and `modelFromTail` never tries to grow past
- * the one read (there is nothing more to read). With neither supplied, production reads
- * the transcript through the real windowed `readTail` above, so a live hook is never
- * forced to read an entire multi-megabyte transcript to find one field near the end.
+ * `readFile` and `readTail` are two SEPARATE seams with no interaction between them —
+ * `readFile` governs only the `settings.json` read (a tiny file; a whole read there is
+ * correct and always was), and the transcript is ALWAYS read through `readTail`, which
+ * defaults to the real windowed implementation above. Passing `readFile` has NO effect on
+ * how the transcript is read.
+ *
+ * This module previously let a supplied `readFile` silently replace the windowed
+ * transcript read with a whole-file read, on the reasoning that a caller supplying only
+ * `readFile` wanted the simpler pre-windowing behaviour back. In practice that made
+ * `readFile` — meant as a settings.json test seam — an accidental second control over
+ * transcript-reading strategy: both real call sites of `currentModel` passed `readFile`
+ * for the settings.json fallback and, without meaning to, disabled the windowed transcript
+ * read in production, including in the `UserPromptSubmit` hook that runs on every single
+ * turn — exactly the whole-file cost the windowed read exists to eliminate. An injection
+ * seam whose mere presence changes production behaviour is a trap; the fix is structural,
+ * not "remember not to pass readFile for the transcript" at each call site. A caller that
+ * wants to control transcript reads in a test now injects `readTail` explicitly.
  */
 export function currentModel({ transcriptPath, settingsPath, readFile, readTail: readTailOverride } = {}) {
   const readWhole = readFile ?? readFileSync
-  const tail = readTailOverride ?? (readFile
-    ? (p) => ({ text: readFile(p, 'utf8'), reachedStart: true }) // a whole-file read has nothing left to grow into
-    : readTail)
+  const tail = readTailOverride ?? readTail
 
   if (transcriptPath) {
     const fromTranscript = modelFromTail(transcriptPath, tail)

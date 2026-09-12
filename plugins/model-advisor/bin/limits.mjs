@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -37,7 +36,7 @@ try {
   // below exactly as it would for a hook that received no transcript_path at all.
   const sessionId = process.argv[2] || null
   const transcriptPath = sessionId ? findSessionTranscript(dir, sessionId) : null
-  const model = currentModel({ transcriptPath, settingsPath: join(dir, 'settings.json'), readFile: readFileSync })
+  const model = currentModel({ transcriptPath, settingsPath: join(dir, 'settings.json') })
 
   const { helps, reason } = switchingHelps(buckets, model)
 
