@@ -12,6 +12,7 @@ export function normaliseLimits(raw) {
       group: l.group ?? null,
       percent: l.percent,
       model: l.scope?.model?.display_name ?? null,
+      modelId: l.scope?.model?.id ?? null,
       resetsAt: l.resets_at ?? null,
       active: l.is_active === true,
     }))
@@ -54,9 +55,9 @@ export function switchingHelps(buckets, currentModel) {
   // Switching helps only if EVERY bucket at the maximum is scoped to the model in use.
   // If any shared bucket, or one scoped to another model, is equally exhausted, then
   // switching moves you off one ceiling straight onto another.
-  const allOurs = atMax.every((b) => b.model && sameModel(b.model, currentModel))
+  const allOurs = atMax.every((b) => b.model && sameModel(b, currentModel))
   if (!allOurs) {
-    const blocker = atMax.find((b) => !b.model || !sameModel(b.model, currentModel))
+    const blocker = atMax.find((b) => !b.model || !sameModel(b, currentModel))
     return { helps: false,
       reason: blocker.model
         ? `The binding limit is scoped to ${blocker.model}, not the model in use. Switching would not change it.`
@@ -67,6 +68,15 @@ export function switchingHelps(buckets, currentModel) {
 }
 
 /**
+ * The API's schema carries a stable `scope.model.id` field, but on every real account
+ * observed so far it is `null` — only `scope.model.display_name` ("Fable", "Opus 4") is
+ * populated. Everything below the id check is a heuristic that exists SOLELY to cover
+ * for that empty field. It is deliberately biased toward returning false (silence)
+ * whenever it cannot be sure, because a confident wrong "switching helps" is worse than
+ * saying nothing. If Anthropic starts populating `id`, every bucket takes the exact-match
+ * branch above and the display-name heuristic below becomes dead weight — delete it then,
+ * rather than extending it with a fourth matching rule.
+ *
  * "Fable" matches "fable" and "claude-fable-5-1", but NOT "affable-5" or "unfabled-model-x".
  * A substring test matched both of those and produced a confident, wrong "switching helps".
  * Compare on token boundaries instead, and require every token of the bucket's name to be
@@ -81,8 +91,19 @@ export function switchingHelps(buckets, currentModel) {
  * "switching helps" — which is the failure direction this module is required to prefer.
  * Do not "fix" this back to subset matching; that is exactly the bug being avoided.
  */
-function sameModel(bucketModel, current) {
-  if (typeof bucketModel !== 'string' || typeof current !== 'string') return false
+function sameModel(bucket, current) {
+  if (typeof current !== 'string') return false
+
+  // A present, non-empty id is a definitive answer either way. A mismatch here must NOT
+  // fall through to the display-name heuristic below — an id that disagrees is a real "no",
+  // and re-checking with the fuzzier heuristic would reintroduce the exact false-positive
+  // risk (a stale/contradictory display_name "rescuing" a match) that having an id removes.
+  if (typeof bucket?.modelId === 'string' && bucket.modelId.length > 0) {
+    return bucket.modelId.toLowerCase() === current.toLowerCase()
+  }
+
+  const bucketModel = bucket?.model
+  if (typeof bucketModel !== 'string') return false
   const tokens = (v) => v.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
   const want = tokens(bucketModel)
   if (want.length === 0 || want.every((t) => /^\d+$/.test(t))) return false

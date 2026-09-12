@@ -13,8 +13,17 @@ test('normalise keeps kind, percent, scope model and active', () => {
   const b = normaliseLimits(REAL)
   assert.equal(b.length, 3)
   assert.equal(b[2].model, 'Fable')
+  assert.equal(b[2].modelId, null)
   assert.equal(b[1].active, true)
   assert.equal(b[0].model, null)
+})
+
+test('normalise captures scope.model.id when the API provides it', () => {
+  const b = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 50, is_active: true,
+      scope: { model: { id: 'claude-fable-5-1', display_name: 'Fable' } } },
+  ] })
+  assert.equal(b[0].modelId, 'claude-fable-5-1')
 })
 
 test('normalise tolerates any payload', () => {
@@ -75,6 +84,47 @@ test('model matching is case-insensitive and tolerates the api id form', () => {
   ] })
   assert.equal(switchingHelps(scoped, 'fable').helps, true)
   assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, true)
+})
+
+test('a present modelId matches the current model by exact, case-insensitive equality', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-fable-5-1', display_name: 'Fable' } } },
+  ] })
+  assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, true)
+  assert.equal(switchingHelps(scoped, 'CLAUDE-FABLE-5-1').helps, true)
+})
+
+test('a present modelId requires exact equality, not substring or token matching', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-opus-4-5-20250929', display_name: 'Opus 4' } } },
+  ] })
+  assert.equal(switchingHelps(scoped, 'claude-opus-4-5').helps, false)
+})
+
+test('a mismatched modelId wins outright and is never rescued by a matching display_name', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-opus-5', display_name: 'Fable' } } },
+  ] })
+  // display_name says "Fable", which would match this current model under the
+  // display-name heuristic alone — but a present, disagreeing modelId must decide first.
+  assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, false)
+})
+
+test('with modelId absent (null), every display-name-based behavior is unchanged', () => {
+  // Every fixture in this file besides the three modelId-specific tests above omits
+  // `scope.model.id`, so normaliseLimits gives them modelId: null and they all still
+  // exercise the display-name fallback exactly as before.
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  assert.equal(scoped[0].modelId, null)
+  assert.equal(switchingHelps(scoped, 'fable').helps, true)
+  assert.equal(switchingHelps(scoped, 'claude-fable-5-1').helps, true)
+  assert.equal(switchingHelps(scoped, 'affable-5').helps, false)
 })
 
 test('a name that merely contains the bucket model as a substring does not match', () => {
