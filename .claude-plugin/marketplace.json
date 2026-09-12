@@ -7,7 +7,7 @@
     {
       "name": "usage-guard",
       "source": "./plugins/usage-guard",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Per-chat budgets enforced against your real account rate limits.",
       "category": "workflow",
       "tags": ["usage", "rate-limits", "budget"]
