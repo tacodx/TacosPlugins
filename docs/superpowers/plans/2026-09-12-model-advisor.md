@@ -420,7 +420,20 @@ if (isMain) run(async (input) => {
 })
 ```
 
-> `getGauges` currently returns normalised gauges and discards the raw payload, but `limits[]` is needed here. Add an opt-in `wantRaw` that also returns `raw`, cached alongside the gauges. Do not change its existing return shape — `usage-guard` depends on it, and a test asserts the vendored copies match. If `wantRaw` turns out to require reshaping the cache, say so in your report rather than breaking the existing contract.
+> **On `wantRaw`.** `getGauges` has seven return paths and its cache stores *normalised*
+> gauges, so widening `data` to `{gauges, raw}` would break every one of them and silently
+> invalidate existing caches. Do not do that.
+>
+> Instead follow the pattern `usage.mjs` already uses for the failure cache: write the raw
+> `limits[]` to its **own** cache file (`usage-raw.json`) beside the others, with the same TTL
+> and the same `readCache`/`writeCache` helpers. `wantRaw: true` then reads that file and adds
+> a `raw` key to the returned object; every existing return path keeps its exact current shape,
+> and a caller that does not ask for raw is completely unaffected.
+>
+> Add a test asserting that `getGauges` **without** `wantRaw` returns an object with no `raw`
+> key, so a future change cannot start leaking it into `usage-guard`'s path. If the raw cache
+> is missing or stale while the gauge cache is fresh, return `raw: null` — `model-advisor`
+> treats that as "no buckets" and stays silent, which is the correct degradation.
 
 - [ ] **Step 4: Write `hooks.json`**
 
