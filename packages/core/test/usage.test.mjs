@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -8,6 +8,14 @@ import { normalise, fetchUsage, getGauges, USAGE_URL } from '../usage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const fixture = (n) => JSON.parse(readFileSync(join(HERE, 'fixtures', `${n}.json`), 'utf8'))
+
+/** A non-expired credentials file so getAccessToken resolves a token without ever
+ *  calling fetchImpl itself — leaving fetchImpl free to stand in for fetchUsage only. */
+function withCreds(dir, now) {
+  writeFileSync(join(dir, '.credentials.json'), JSON.stringify({
+    claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: now + 999_999_999 },
+  }))
+}
 
 test('utilization becomes percent and resets_at becomes resetsAt', () => {
   const g = normalise(fixture('usage-max'))
@@ -85,4 +93,95 @@ test('getGauges is blind when there is no cache and no credentials', async () =>
   assert.equal(result.blind, true)
   assert.equal(result.gauges, null)
   assert.equal(fetchCalled, false) // no token available, so fetchUsage must never be reached
+})
+
+test('a failure suppresses an immediate retry', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  let fetchCount = 0
+  const failingFetch = async () => { fetchCount++; return { ok: false, status: 500 } }
+  try {
+    const first = await getGauges({ dir, now, fetchImpl: failingFetch })
+    assert.equal(first.blind, true)
+    assert.equal(fetchCount, 1)
+
+    const second = await getGauges({ dir, now: now + 1000, fetchImpl: failingFetch })
+    assert.equal(second.blind, true)
+    assert.equal(second.reason, first.reason)
+    assert.equal(fetchCount, 1, 'a call inside the backoff window must never re-hit the network')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the suppression expires and the next call retries normally', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    await getGauges({ dir, now, fetchImpl: async () => ({ ok: false, status: 500 }) })
+
+    let fetchCalled = false
+    const result = await getGauges({
+      dir, now: now + 30_001, // one generic (non-429) backoff period plus a millisecond
+      fetchImpl: async () => { fetchCalled = true; return { ok: true, json: async () => fixture('usage-max') } },
+    })
+    assert.equal(fetchCalled, true, 'the network must be retried once the backoff window has elapsed')
+    assert.equal(result.blind, false)
+    assert.equal(result.fresh, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a 429 backs off longer than a generic error', async () => {
+  const dir429 = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const dirGeneric = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir429, now)
+  withCreds(dirGeneric, now)
+  try {
+    await getGauges({ dir: dir429, now, fetchImpl: async () => ({ ok: false, status: 429 }) })
+    await getGauges({ dir: dirGeneric, now, fetchImpl: async () => ({ ok: false, status: 500 }) })
+
+    // Past the generic backoff (30s) but well inside the 429 backoff (5min).
+    const later = now + 31_000
+    let genericFetchCalled = false
+    let retry429Called = false
+    await getGauges({
+      dir: dirGeneric, now: later,
+      fetchImpl: async () => { genericFetchCalled = true; return { ok: true, json: async () => ({}) } },
+    })
+    await getGauges({
+      dir: dir429, now: later,
+      fetchImpl: async () => { retry429Called = true; return { ok: true, json: async () => ({}) } },
+    })
+    assert.equal(genericFetchCalled, true, 'a generic failure must have backed off by now')
+    assert.equal(retry429Called, false, 'a 429 must still be backing off at the same elapsed time')
+  } finally {
+    rmSync(dir429, { recursive: true, force: true })
+    rmSync(dirGeneric, { recursive: true, force: true })
+  }
+})
+
+test('a cached failure yields blind: true and never touches the network while active', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  let fetchCalled = false
+  try {
+    // Seed the failure record directly, exactly as getGauges itself would have written it.
+    await getGauges({ dir, now, fetchImpl: async () => ({ ok: false, status: 500 }) })
+
+    const result = await getGauges({
+      dir, now: now + 500,
+      fetchImpl: async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } },
+    })
+    assert.equal(result.blind, true)
+    assert.equal(result.gauges, null)
+    assert.equal(fetchCalled, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
