@@ -193,18 +193,33 @@ export function switchingHelps(buckets, currentModel) {
 }
 
 /**
- * "Fable" matches "fable" and "claude-fable-5-1", but NOT "affable-5" or "unfabled-model-x".
- * A substring test matched both of those and produced a confident, wrong "switching helps".
- * Compare on token boundaries instead, and require every token of the bucket's name to be
- * present. A name made only of digits identifies nothing, so it never matches.
+ * Model identity matching, deliberately biased toward silence.
+ *
+ * Two false-positive classes were found here in review, and both produced confident wrong
+ * advice — the thing this module exists not to do:
+ *   - a substring test matched "affable-5" and "unfabled-model-x" against a "Fable" bucket;
+ *   - token-SUBSET matching then matched "Opus 4" against "claude-opus-4-5-20250929",
+ *     a different model, because a versioned name is a subset of a later version's id.
+ *
+ * So: an UNVERSIONED family name (no digits) matches any id containing all its words —
+ * "Fable" matches "claude-fable-5-1", "Claude Opus" matches "claude-opus-5". A name carrying
+ * a version is matched only by exact equality, because there is no safe way to tell
+ * "Opus 4" from "Opus 4.5" by subset. That yields false NEGATIVES on versioned bucket
+ * names, which means the plugin stays silent — the correct failure direction, and what the
+ * spec already says to do when it cannot be sure.
  */
 function sameModel(bucketModel, current) {
   if (typeof bucketModel !== 'string' || typeof current !== 'string') return false
   const tokens = (v) => v.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
   const want = tokens(bucketModel)
-  if (want.length === 0 || want.every((t) => /^\d+$/.test(t))) return false
-  const have = new Set(tokens(current))
-  return want.every((t) => have.has(t))
+  const have = tokens(current)
+  if (want.length === 0 || have.length === 0) return false
+  if (want.every((t) => /^\d+$/.test(t))) return false // a number identifies no model
+
+  if (want.some((t) => /\d/.test(t))) return want.join('-') === have.join('-')
+
+  const haveSet = new Set(have)
+  return want.every((t) => haveSet.has(t))
 }
 ```
 
