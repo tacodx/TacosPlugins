@@ -112,7 +112,10 @@ Read this before deciding whether to install it.
   it's the one that can stop a tool call. This plugin only informs. Every
   code path in it ends in either a line of context or nothing at all; there
   is no `deny` output anywhere in its source, and a test asserts that no
-  combination of inputs produces one.
+  combination of inputs produces one. That's true of every path this plugin
+  can actually reach — `lib/hookio.mjs` (vendored, shared with `usage-guard`)
+  does export a `denyOutput` function, so a grep for it will find one, but
+  this plugin never imports or calls it.
 
 - **It makes no claim about relative model cost.** The usage API does not
   expose how one model's usage compares to another's, and inventing a ratio
@@ -175,3 +178,17 @@ Read this before deciding whether to install it.
   collapse to silence rather than a crash or a wrong claim. See
   [`usage-guard`'s README](../usage-guard/README.md#limitations) for the
   detail on both — it isn't repeated here.
+
+- **The full API response is written to disk, mode 0600.** Every successful
+  fetch — whether triggered by this plugin or by `usage-guard`, since both
+  share the same cache directory — writes the complete, unmodified response
+  to `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/usage-raw.json`, not just the
+  `limits[]` subset `/limits` and the hook actually read.
+
+- **When the usage data itself can't be read, `/limits` says so and stops —
+  it never guesses at "zero buckets" instead.** A blind account (no
+  credentials, an API error) or a cache stale enough to no longer be usable
+  both print a plain "usage data could not be read" line, with the reason
+  when one is known, and no bucket list or percentage at all. That's a
+  different claim from "the account reported no buckets" (see `buckets.mjs`'s
+  own no-buckets reason), which only prints on an actual successful read.
