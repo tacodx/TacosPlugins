@@ -67,6 +67,17 @@ test('returns null, not an empty string, when the transcript model strips to not
   assert.equal(m, null)
 })
 
+test('falls through to settings when the transcript model is unusable, not just empty-but-final', () => {
+  const m = currentModel({
+    transcriptPath: '/t', settingsPath: '/s',
+    // The transcript's most recent row is literally "[1m]" — stripSuffix reduces it to ''.
+    // That must not end the search: it's unusable, not a reason to stop before settings.
+    readTail: () => ({ text: row('[1m]', '1'), reachedStart: true }),
+    readFile: () => JSON.stringify({ model: 'claude-sonnet-5' }),
+  })
+  assert.equal(m, 'claude-sonnet-5')
+})
+
 test('finds the model in the first window without growing', () => {
   const calls = []
   const m = currentModel({

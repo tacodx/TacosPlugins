@@ -111,10 +111,14 @@ export function currentModel({ transcriptPath, settingsPath, readFile, readTail:
 
   if (transcriptPath) {
     const fromTranscript = modelFromTail(transcriptPath, tail)
-    // Symmetric with the settings branch below: a model that strips down to '' (e.g. the
-    // transcript's most recent row is literally "[1m]") must still surface as null, not
-    // as a truthy-looking empty string the caller could mistake for "a model we can't name".
-    if (fromTranscript) return stripSuffix(fromTranscript) || null
+    // A transcript model that strips down to '' (e.g. the most recent row is literally
+    // "[1m]") is not a usable value — but it is also not a reason to stop looking. It
+    // must be treated exactly like a transcript that yielded nothing at all: fall through
+    // to settingsPath rather than returning early with a bad answer (or, as a prior bug
+    // here did, with '' itself — a truthy-looking empty string the caller could mistake
+    // for "a model we can't name").
+    const stripped = fromTranscript ? stripSuffix(fromTranscript) : null
+    if (stripped) return stripped
   }
   if (settingsPath) {
     let raw
