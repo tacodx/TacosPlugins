@@ -16,6 +16,25 @@ test('a blind guard allows even with real gauge data at 100% in enforce mode', (
   assert.equal(r.action, 'allow')
 })
 
+test('a blind guard says so once, on SessionStart, naming the reason', () => {
+  const r = decideForHook({ input: input({ hook_event_name: 'SessionStart' }), cfg, gauges: null, blind: true, reason: 'no-credentials' })
+  assert.equal(r.action, 'context')
+  assert.match(r.text, /no usage data/i)
+  assert.match(r.text, /no-credentials/)
+  assert.match(r.text, /allowing everything/i)
+})
+
+test('a blind guard on PreToolUse stays a silent allow, even though SessionStart would speak up', () => {
+  const r = decideForHook({ input: input({ hook_event_name: 'PreToolUse' }), cfg, gauges: null, blind: true, reason: 'no-credentials' })
+  assert.equal(r.action, 'allow')
+  assert.equal(r.text, null)
+})
+
+test('mode off suppresses even the blind SessionStart notice', () => {
+  const r = decideForHook({ input: input({ hook_event_name: 'SessionStart' }), cfg: { ...cfg, mode: 'off' }, gauges: null, blind: true, reason: 'no-credentials' })
+  assert.equal(r.action, 'allow')
+})
+
 test('below soft, nothing is injected', () => {
   const r = decideForHook({ input: input(), cfg, gauges: at(10), blind: false })
   assert.equal(r.action, 'allow')
