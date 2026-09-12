@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, openSync, fstatSync, readSync, closeSync } from 'node:fs'
 
 /** Pure. Last row wins; `<synthetic>` is not a real model. */
 export function modelFromTranscript(text) {
@@ -21,19 +21,106 @@ export function stripSuffix(model) {
   return i === -1 ? model : model.slice(0, i)
 }
 
-/** Never throws. Returns null when the model cannot be determined — the caller stays silent. */
-export function currentModel({ transcriptPath, settingsPath, readFile = readFileSync }) {
-  const read = (p) => {
-    try { return readFile(p, 'utf8') } catch { return null } // unreadable tells us nothing; fall through
+// Windows tried, smallest first. A JSONL transcript's most recent model is almost always
+// inside the last 64KB; the larger sizes are only needed when a long run of synthetic/tool
+// rows, or one outsized row, pushes the real answer further back than that.
+const WINDOW_SIZES = [64 * 1024, 1024 * 1024, 16 * 1024 * 1024]
+
+/**
+ * Reads at most the last `bytes` bytes of the file at `path`, returning
+ * `{ text, reachedStart }`.
+ *
+ * A byte offset into a JSONL file is not necessarily a row boundary. When the read
+ * starts strictly past byte 0 (the file is bigger than the window), whatever sits
+ * before the first '\n' is a row we landed inside of, not at its start, and can never
+ * be safely parsed — so it is REMOVED: everything up to and including that '\n' is cut
+ * from the returned text. This is safe because a line boundary in this format is always
+ * an ASCII newline, and an ASCII byte can never appear as a continuation byte of a
+ * multi-byte UTF-8 character, so cutting the text at it can never split one.
+ *
+ * If the window never reaches a '\n' at all — the tail end of one row bigger than the
+ * whole window — there is no boundary to cut at, so the raw (as yet unparseable) bytes
+ * are returned unchanged. `modelFromTranscript` will fail to parse that single fragment
+ * as JSON and find nothing, and `reachedStart: false` correctly tells the caller a
+ * bigger window might do better.
+ *
+ * `reachedStart` is computed directly from the file size (true exactly when the whole
+ * file fit inside the requested window), not inferred from the returned text's length.
+ * Removing the leading fragment above makes `text` shorter than `bytes` on every
+ * ordinary discard, not only when the start of the file was actually reached, so the
+ * length can no longer serve as that signal — it has to be explicit.
+ */
+export function readTail(path, bytes, {
+  open = openSync, fstat = fstatSync, read = readSync, close = closeSync,
+} = {}) {
+  const fd = open(path, 'r')
+  try {
+    const size = fstat(fd).size
+    const len = Math.min(bytes, size)
+    const filePos = size - len
+    const buf = Buffer.alloc(len)
+    read(fd, buf, 0, len, filePos)
+    let text = buf.toString('utf8')
+    if (filePos > 0) {
+      const nl = text.indexOf('\n')
+      if (nl !== -1) text = text.slice(nl + 1) // drop the fragment we landed inside of; keep the newline's own successor onward
+    }
+    return { text, reachedStart: filePos === 0 }
+  } finally {
+    close(fd)
   }
+}
+
+/**
+ * Tries growing windows so a fresh transcript resolves without reading the whole file,
+ * while a pathological tail (long runs of synthetic/tool rows, or one huge row) still
+ * resolves correctly by growing until it does.
+ *
+ * Never throws: an unreadable transcript (missing file, permission error, whatever
+ * `readTailFn` throws) tells us nothing, so this returns null and `currentModel` falls
+ * back to settings exactly as it would for an empty transcript.
+ */
+function modelFromTail(transcriptPath, readTailFn) {
+  for (const bytes of WINDOW_SIZES) {
+    let text, reachedStart
+    try { ({ text, reachedStart } = readTailFn(transcriptPath, bytes)) } catch { return null } // a thrown read or a malformed result both tell us nothing
+    const model = modelFromTranscript(text)
+    if (model) return model
+    if (reachedStart) return null // the whole file was already read; a bigger window can't add anything
+  }
+  return null
+}
+
+/**
+ * Never throws. Returns null when the model cannot be determined — the caller stays silent.
+ *
+ * `readFile` and `readTail` are independent, optional overrides. A caller that supplies
+ * only `readFile` (the shape this module originally took) still gets the transcript read
+ * through it, wholesale, exactly as before — no caller that only injects `readFile` needs
+ * to change. That whole-file read is wrapped as `{ text, reachedStart: true }` so it
+ * matches the real `readTail`'s return shape and `modelFromTail` never tries to grow past
+ * the one read (there is nothing more to read). With neither supplied, production reads
+ * the transcript through the real windowed `readTail` above, so a live hook is never
+ * forced to read an entire multi-megabyte transcript to find one field near the end.
+ */
+export function currentModel({ transcriptPath, settingsPath, readFile, readTail: readTailOverride } = {}) {
+  const readWhole = readFile ?? readFileSync
+  const tail = readTailOverride ?? (readFile
+    ? (p) => ({ text: readFile(p, 'utf8'), reachedStart: true }) // a whole-file read has nothing left to grow into
+    : readTail)
+
   if (transcriptPath) {
-    const fromTranscript = modelFromTranscript(read(transcriptPath))
-    if (fromTranscript) return stripSuffix(fromTranscript)
+    const fromTranscript = modelFromTail(transcriptPath, tail)
+    // Symmetric with the settings branch below: a model that strips down to '' (e.g. the
+    // transcript's most recent row is literally "[1m]") must still surface as null, not
+    // as a truthy-looking empty string the caller could mistake for "a model we can't name".
+    if (fromTranscript) return stripSuffix(fromTranscript) || null
   }
   if (settingsPath) {
-    const raw = read(settingsPath)
+    let raw
+    try { raw = readWhole(settingsPath, 'utf8') } catch { return null } // unreadable settings tells us nothing
     try { return stripSuffix(JSON.parse(raw)?.model) || null }
-    catch { return null } // unreadable or malformed settings tells us nothing
+    catch { return null } // malformed settings tells us nothing
   }
   return null
 }
