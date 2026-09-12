@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
-import { normalise, fetchUsage, getGauges, USAGE_URL } from '../usage.mjs'
+import { normalise, fetchUsage, getGauges, USAGE_URL, rawCachePath } from '../usage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const fixture = (n) => JSON.parse(readFileSync(join(HERE, 'fixtures', `${n}.json`), 'utf8'))
@@ -162,6 +162,79 @@ test('a 429 backs off longer than a generic error', async () => {
   } finally {
     rmSync(dir429, { recursive: true, force: true })
     rmSync(dirGeneric, { recursive: true, force: true })
+  }
+})
+
+// model-advisor's whole safety story rests on getGauges NEVER leaking limits[] into
+// usage-guard's path just because model-advisor asked for it moments earlier. Both plugins
+// share the same on-disk cache directory, so this has to be proven from a live network
+// fetch (the shape a real success return takes), not merely from an empty-dir blind path.
+test('getGauges without wantRaw has no raw key, even after a live fetch populates the raw cache', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    const result = await getGauges({ dir, now, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+    assert.equal(Object.hasOwn(result, 'raw'), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('wantRaw on a live fetch returns the raw limits[] payload and persists it to its own cache file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    const result = await getGauges({
+      dir, now, wantRaw: true,
+      fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }),
+    })
+    assert.ok(Array.isArray(result.raw?.limits))
+    assert.equal(result.raw.limits[1].kind, 'weekly_scoped')
+    const onDisk = JSON.parse(readFileSync(rawCachePath(dir), 'utf8'))
+    assert.deepEqual(onDisk.data, fixture('usage-max'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('wantRaw on a fresh gauge-cache hit reads raw back from its own cache file, without touching the network', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    await getGauges({ dir, now, wantRaw: true, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+
+    let fetchCalled = false
+    const result = await getGauges({
+      dir, now: now + 1, wantRaw: true,
+      fetchImpl: async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } },
+    })
+    assert.equal(result.fresh, true, 'sanity check: the gauge cache must be a fresh hit for this test to mean anything')
+    assert.equal(fetchCalled, false)
+    assert.ok(Array.isArray(result.raw?.limits))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Brief: "If the raw cache is missing or stale while the gauge cache is fresh, return
+// raw: null — the advisor treats that as no buckets and stays silent." Simulated here by
+// deleting the raw cache file after it was written, while the gauge cache is still fresh.
+test('wantRaw returns null when the raw cache is missing but the gauge cache is still fresh', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    await getGauges({ dir, now, wantRaw: true, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+    rmSync(rawCachePath(dir), { force: true })
+
+    const result = await getGauges({ dir, now: now + 1, wantRaw: true, fetchImpl: async () => { throw new Error('must not be called') } })
+    assert.equal(result.fresh, true)
+    assert.equal(result.raw, null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

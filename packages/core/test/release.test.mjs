@@ -63,19 +63,29 @@ test('vendorCore prunes a stale module removed from core, but leaves non-.mjs fi
 // actually shipped in git must never drift from packages/core. `npm test` runs against
 // the working tree exactly as `git archive` would ship it, so this fails the moment
 // someone edits packages/core and forgets to re-run scripts/release.mjs before committing.
-test('every packages/core module is vendored byte-identically into plugins/usage-guard/lib/', () => {
+//
+// Loops over every directory under plugins/ (exactly the set scripts/release.mjs's own
+// isMain block vendors into) rather than naming usage-guard alone, so this keeps covering
+// every plugin — model-advisor now, and whatever ships next — with no further edit here.
+test('every packages/core module is vendored byte-identically into every plugin/*/lib/', () => {
   const core = join(ROOT, 'packages', 'core')
-  const lib = join(ROOT, 'plugins', 'usage-guard', 'lib')
+  const pluginsDir = join(ROOT, 'plugins')
   const coreModules = readdirSync(core)
     .filter((name) => name.endsWith('.mjs') && !statSync(join(core, name)).isDirectory())
+  const plugins = readdirSync(pluginsDir)
+    .filter((name) => statSync(join(pluginsDir, name)).isDirectory())
 
   assert.ok(coreModules.length > 0, 'sanity check: packages/core must actually contain modules')
+  assert.ok(plugins.length >= 2, 'sanity check: this must cover more than one plugin')
 
-  for (const name of coreModules) {
-    const vendoredPath = join(lib, name)
-    assert.ok(existsSync(vendoredPath), `plugins/usage-guard/lib/${name} is missing — run scripts/release.mjs`)
-    const source = readFileSync(join(core, name), 'utf8')
-    const vendored = readFileSync(vendoredPath, 'utf8')
-    assert.equal(vendored, source, `plugins/usage-guard/lib/${name} has drifted from packages/core/${name} — run scripts/release.mjs and commit the result`)
+  for (const plugin of plugins) {
+    const lib = join(pluginsDir, plugin, 'lib')
+    for (const name of coreModules) {
+      const vendoredPath = join(lib, name)
+      assert.ok(existsSync(vendoredPath), `plugins/${plugin}/lib/${name} is missing — run scripts/release.mjs`)
+      const source = readFileSync(join(core, name), 'utf8')
+      const vendored = readFileSync(vendoredPath, 'utf8')
+      assert.equal(vendored, source, `plugins/${plugin}/lib/${name} has drifted from packages/core/${name} — run scripts/release.mjs and commit the result`)
+    }
   }
 })
