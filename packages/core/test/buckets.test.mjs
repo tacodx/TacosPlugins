@@ -274,6 +274,61 @@ test('a versioned bucket name still matches an exactly equal token sequence', ()
   assert.equal(switchingHelps(opus4, 'opus-4').helps, true)
 })
 
+// --- Finding 3: the version-match rule must be a contiguous-subsequence, not exact-length ---
+
+test('"Fable 5.1" matches "claude-fable-5-1" — a real model id always carries a prefix', () => {
+  // The exact-length rule this replaces could never match here: tokens("Fable 5.1") has
+  // length 3, tokens("claude-fable-5-1") has length 4, and no real model id is ever
+  // prefix-free — so every versioned bucket name matched nothing under that rule. This is
+  // the bug finding 3 exists to fix.
+  const fable = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Fable 5.1' } } },
+  ] })
+  assert.equal(switchingHelps(fable, 'claude-fable-5-1').helps, true)
+})
+
+test('"Opus 4" does not match "claude-opus-4-5-20250929" — a short numeric next token is a finer version', () => {
+  const opus4 = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Opus 4' } } },
+  ] })
+  assert.equal(switchingHelps(opus4, 'claude-opus-4-5-20250929').helps, false)
+})
+
+test('"Opus 4 5" matches "claude-opus-4-5-20250929" — a six-plus-digit next token is a date, not a version', () => {
+  const opus45 = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Opus 4 5' } } },
+  ] })
+  assert.equal(switchingHelps(opus45, 'claude-opus-4-5-20250929').helps, true)
+})
+
+test('a confirmed-different model (modelId present and disagreeing) says "not the model in use"', () => {
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { id: 'claude-fable-5-1', display_name: 'Fable' } } },
+  ] })
+  const r = switchingHelps(scoped, 'claude-opus-5')
+  assert.equal(r.helps, false)
+  assert.match(r.reason, /not the model in use/)
+  assert.doesNotMatch(r.reason, /could not confirm/i)
+})
+
+test('an unconfirmed match (display-name heuristic failure, no modelId) says "could not confirm" — never asserts "not"', () => {
+  // This is the "worse half" of finding 3: matching failure via the display-name
+  // heuristic is NOT the same claim as a confirmed-different modelId, and must not be
+  // worded as though it were.
+  const scoped = normaliseLimits({ limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,
+      scope: { model: { display_name: 'Opus 4' } } },
+  ] })
+  const r = switchingHelps(scoped, 'claude-opus-4-5-20250929')
+  assert.equal(r.helps, false)
+  assert.match(r.reason, /could not confirm/i)
+  assert.doesNotMatch(r.reason, /not the model in use/)
+})
+
 test('non-versioned bucket names are unaffected by the version-digit exact-match rule', () => {
   const fable = normaliseLimits({ limits: [
     { kind: 'weekly_scoped', group: 'weekly', percent: 88, is_active: true,

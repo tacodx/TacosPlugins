@@ -143,7 +143,26 @@ function inapplicabilityReason(bucket, max) {
     // a claim this function cannot back up.
     return `The binding limit is ${bucket.kind} at ${Math.round(max)}%. Its scope could not be determined.`
   }
-  return `The binding limit is scoped to ${label} at ${Math.round(max)}%, which does not apply to the model in use. Switching would not change it.`
+  // A present `modelId` that disagrees is something the API told us directly — we KNOW
+  // it's a different model. A display-name-only mismatch is a heuristic that failed to
+  // CONFIRM a match; that is not the same claim, and must not be worded as one — see
+  // sameModel's own doc comment for why a failed heuristic match is silence, not a "no".
+  const knownDifferentModel = typeof bucket?.modelId === 'string' && bucket.modelId.length > 0
+  return knownDifferentModel
+    ? `The binding limit is scoped to ${label} at ${Math.round(max)}%, not the model in use. Switching would not change it.`
+    : `The binding limit is scoped to ${label} at ${Math.round(max)}%; could not confirm whether that is the model in use. Switching would not be shown to help.`
+}
+
+/** Returns the index in `have` where `want` starts as a contiguous run, or -1. */
+function findContiguousRun(want, have) {
+  for (let i = 0; i + want.length <= have.length; i++) {
+    let matched = true
+    for (let j = 0; j < want.length; j++) {
+      if (have[i + j] !== want[j]) { matched = false; break }
+    }
+    if (matched) return i
+  }
+  return -1
 }
 
 /**
@@ -161,14 +180,33 @@ function inapplicabilityReason(bucket, max) {
  * Compare on token boundaries instead, and require every token of the bucket's name to be
  * present. A name made only of digits identifies nothing, so it never matches.
  *
- * A bucket name carrying a version digit ("Opus 4") is a SEPARATE case: token-subset
- * matching let it match "claude-opus-4-5-20250929" too, because that id's tokens are a
- * superset of the bucket's. There is no safe way to tell "Opus 4" apart from "Opus 4.5"
- * or any other point release by subset containment, so once any token is numeric we
- * require the tokens to match EXACTLY (same length, same order) instead of by subset.
- * That yields a false NEGATIVE on a real match we can't verify — silence, not a wrong
- * "switching helps" — which is the failure direction this module is required to prefer.
- * Do not "fix" this back to subset matching; that is exactly the bug being avoided.
+ * A bucket name carrying a version digit ("Opus 4") is a SEPARATE case, matched by a
+ * CONTIGUOUS-SUBSEQUENCE rule instead of subset containment: the bucket's own tokens must
+ * appear as an unbroken run, in order, somewhere inside the model id's tokens. Subset
+ * containment let "Opus 4" match "claude-opus-4-5-20250929" — a real point release the
+ * bucket name does not name — because that id's tokens are merely a superset of the
+ * bucket's, order and adjacency ignored. Exact-length equality (a prior version of this
+ * rule) swung too far the other way: a real model id always carries a "claude-" prefix
+ * (and often other tokens), so "Fable 5.1" could never equal "claude-fable-5-1" and every
+ * versioned bucket name matched nothing at all. Neither extreme is right.
+ *
+ * The contiguous run alone is not quite enough, though: it would let "Opus 4" match
+ * "claude-opus-4-5-20250929" too, since "opus","4" is a contiguous run inside
+ * "claude","opus","4","5","20250929" — just not at the end. So the token immediately
+ * FOLLOWING the run also matters:
+ *   - no following token at all -> accept ("Fable 5.1" vs "claude-fable-5-1")
+ *   - a following token that is numeric with FEWER than six digits -> reject: it's a
+ *     finer version component ("Opus 4" vs "...opus-4-5-..." — that's Opus 4.5, not Opus 4)
+ *   - a following token that is numeric with six digits or more -> accept: that many
+ *     digits is a date stamp (a build/release date suffix), not a version component, and
+ *     does not block the match ("Opus 4 5" vs "...opus-4-5-20250929" — the date follows
+ *     the run, so this is still exactly Opus 4.5)
+ *
+ * This is still a heuristic, not a parser for Anthropic's model-id grammar, and it is
+ * deliberately biased toward REJECTION: on anything it cannot be sure of, it says no,
+ * which this module has always treated as silence rather than a wrong "switching helps"
+ * (see the module doc above). Do not "fix" this back to subset containment or to exact
+ * length equality; those are exactly the two failure modes being avoided here.
  */
 function sameModel(bucket, current) {
   if (typeof current !== 'string') return false
@@ -188,7 +226,11 @@ function sameModel(bucket, current) {
   if (want.length === 0 || want.every((t) => /^\d+$/.test(t))) return false
   const have = tokens(current)
   if (want.some((t) => /\d/.test(t))) {
-    return have.length === want.length && want.every((t, i) => have[i] === t)
+    const start = findContiguousRun(want, have)
+    if (start === -1) return false
+    const next = have[start + want.length]
+    if (next !== undefined && /^\d+$/.test(next) && next.length < 6) return false
+    return true
   }
   const haveSet = new Set(have)
   return want.every((t) => haveSet.has(t))
