@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "tacos-plugins",
+  "description": "Practical Claude Code plugins.",
+  "owner": { "name": "tacodx" },
+  "plugins": [
+    {
+      "name": "usage-guard",
+      "source": "./plugins/usage-guard",
+      "version": "0.1.0",
+      "description": "Per-chat budgets enforced against your real account rate limits.",
+      "category": "workflow",
+      "tags": ["usage", "rate-limits", "budget"]
+    }
+  ]
+}

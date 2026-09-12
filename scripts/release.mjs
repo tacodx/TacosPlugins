@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+/** Copies every top-level .mjs from coreDir into targetLibDir, pruning any .mjs
+ *  in targetLibDir that no longer has a source in coreDir. Returns copied filenames. */
+export function vendorCore(coreDir, targetLibDir) {
+  mkdirSync(targetLibDir, { recursive: true })
+  const copied = []
+  for (const name of readdirSync(coreDir)) {
+    if (!name.endsWith('.mjs')) continue
+    if (statSync(join(coreDir, name)).isDirectory()) continue
+    copyFileSync(join(coreDir, name), join(targetLibDir, name))
+    copied.push(name)
+  }
+  const wanted = new Set(copied)
+  for (const name of readdirSync(targetLibDir)) {
+    if (name.endsWith('.mjs') && !wanted.has(name)) {
+      rmSync(join(targetLibDir, name), { force: true })
+    }
+  }
+  return copied
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isMain) {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const core = join(root, 'packages', 'core')
+  for (const plugin of readdirSync(join(root, 'plugins'))) {
+    const lib = join(root, 'plugins', plugin, 'lib')
+    const copied = vendorCore(core, lib)
+    console.log(`vendored ${copied.length} modules into plugins/${plugin}/lib/`)
+  }
+}

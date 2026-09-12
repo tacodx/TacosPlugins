@@ -23,6 +23,12 @@ Every task's requirements implicitly include this section.
 - **`cwd` at hook time is the user's project directory**, never the plugin root. Derive paths from `process.env.CLAUDE_PLUGIN_ROOT`.
 - **Never write `"matcher": "*"`.** A matcher containing characters outside `[A-Za-z0-9_|,-]` compiles as a JS RegExp, and a lone `*` is invalid ("nothing to repeat"). Invalid matchers return false silently. Omit the key to match all tools.
 - **Commits carry no `Co-Authored-By` trailer and no "Generated with" line.** This is the repo owner's standing rule.
+- **Every fail-open `catch` carries a one-line comment** saying it is deliberate and why. The empty catches in `cache.mjs`, `auth.mjs`, `config.mjs` and `session.mjs`, and the `uncaughtException`/`unhandledRejection` handlers in `hookio.mjs`, are required by the fail-open rule above — not oversights.
+- **Never assert inside an injected mock that is passed to a fail-open function.** These modules
+  swallow exceptions by design, so an `assert` that throws inside a mock is caught by the code
+  under test and the test passes no matter what. Record what the mock received into a variable,
+  let the call return, then assert afterwards. A test whose assertions live inside the mock is
+  vacuous — it reads as coverage while verifying nothing.
 - **No network calls in tests.** Every module that touches the network takes an injected `fetchImpl`.
 - **Injected clock.** Anything time-dependent takes a `now` parameter (milliseconds) so tests are deterministic.
 
@@ -90,7 +96,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const readJson = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'))
@@ -145,7 +151,7 @@ Expected: FAIL — `ENOENT` opening `.claude-plugin/marketplace.json`.
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test packages/core/test/" }
+  "scripts": { "test": "node --test" }
 }
 ```
 
@@ -302,7 +308,9 @@ export function decide(gauges, thresholds) {
   for (const [name, limit] of Object.entries(thresholds)) {
     const gauge = gauges[name]
     if (!gauge || typeof gauge.percent !== 'number' || Number.isNaN(gauge.percent)) continue
-    if (!limit || typeof limit.soft !== 'number' || typeof limit.hard !== 'number') continue
+    if (!limit) continue
+    if (typeof limit.soft !== 'number' || Number.isNaN(limit.soft)) continue
+    if (typeof limit.hard !== 'number' || Number.isNaN(limit.hard)) continue
 
     let state = STATE.OK
     if (gauge.percent >= limit.hard) state = STATE.HARD
@@ -459,12 +467,37 @@ export function mergeConfig(userConfig, sessionConfig) {
 
 /** Never throws. Any read or parse failure degrades to the layer below. */
 export function readConfig({ dir, sessionId, readFile }) {
-  const load = (path) => {
-    try { return JSON.parse(readFile(path, 'utf8')) } catch { return {} }
+  let unreadable = false
+  // join() lives INSIDE the try: path.join throws on a non-string segment,
+  // and readConfig's contract is that no input can make it throw.
+  const load = (...segments) => {
+    try { return JSON.parse(readFile(join(...segments), 'utf8')) }
+    catch (err) {
+      // ENOENT is "no config yet", and the shipped defaults are the right answer.
+      // Anything else means the user HAS settings we cannot read. Falling back to
+      // defaults would silently re-arm a guard they may have deliberately turned off,
+      // so record it and degrade to dry-run below.
+      if (err?.code !== 'ENOENT') unreadable = true
+      return {}
+    }
   }
-  const user = load(join(dir, 'tacos', 'config.json'))
-  const session = sessionId ? load(join(dir, 'tacos', 'sessions', `${sessionId}.json`)) : {}
-  return mergeConfig(user, session)
+  const user = load(dir, 'tacos', 'config.json')
+  const session = sessionId ? load(dir, 'tacos', 'sessions', `${sessionId}.json`) : {}
+  const merged = mergeConfig(user, session)
+
+  if (!unreadable) return merged
+
+  // Something was unreadable. Two things must both hold:
+  //  - we must never NEWLY enforce on data we could not parse, and
+  //  - we must never DISCARD a mode a readable layer stated explicitly.
+  // A corrupt session file must not override the user's own valid config, in either
+  // direction. Only when no readable layer named a mode do we fall to dry-run.
+  const explicitlySet = MODES.has(session?.mode) || MODES.has(user?.mode)
+  return {
+    ...merged,
+    mode: explicitlySet ? merged.mode : 'dry-run',
+    configUnreadable: true,
+  }
 }
 ```
 
@@ -588,13 +621,18 @@ export function readCache(path, { now, ttlMs, maxStaleMs, readFile = readFileSyn
 /** Never throws — a cache we cannot persist is a slow cache, not a broken session. */
 export function writeCache(path, data, {
   now, writeFile = writeFileSync, mkdir = mkdirSync,
+  rename = renameSync, remove = unlinkSync,
 } = {}) {
+  const tmp = `${path}.${process.pid}.tmp`
   try {
     mkdir(dirname(path), { recursive: true })
-    const tmp = `${path}.${process.pid}.tmp`
     writeFile(tmp, JSON.stringify({ fetchedAt: now, data }), { mode: 0o600 })
-    renameSync(tmp, path)
-  } catch { /* ignore */ }
+    rename(tmp, path)
+  } catch { // fail-open: a cache we cannot persist is a slow cache, not a broken session
+    // a failed rename leaves the tmp file behind; each hook run is a new pid, so
+    // without this they would accumulate indefinitely
+    try { remove(tmp) } catch { /* tmp may never have been created; nothing to clean up */ }
+  }
 }
 
 const defaultFs = {
@@ -727,6 +765,7 @@ test('write-back preserves sibling keys such as mcpOAuth', () => {
   writeBackCredentials('/p', { accessToken: 'new', refreshToken: 'r2', expiresAt: 9 }, {
     readFile: () => JSON.stringify({ mcpOAuth: { server: { token: 'keep' } }, claudeAiOauth: cred }),
     writeFile: (_p, body) => { written = JSON.parse(body) },
+    rename: () => {},
   })
   assert.equal(written.mcpOAuth.server.token, 'keep', 'mcp tokens must survive')
   assert.equal(written.claudeAiOauth.accessToken, 'new')
@@ -737,6 +776,7 @@ test('write-back uses mode 0600', () => {
   writeBackCredentials('/p', cred, {
     readFile: () => JSON.stringify({ claudeAiOauth: cred }),
     writeFile: (_p, _b, opts) => { mode = opts?.mode },
+    rename: () => {},
   })
   assert.equal(mode, 0o600)
 })
@@ -752,7 +792,8 @@ Expected: FAIL — cannot find module `../auth.mjs`.
 Create `packages/core/auth.mjs`:
 
 ```js
-import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 export const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
@@ -775,7 +816,10 @@ export function readCredentials(path, readFile = readFileSync) {
 }
 
 export function isExpired(cred, now, marginMs = EXPIRY_MARGIN_MS) {
-  if (!cred?.expiresAt) return false
+  // A credential with no usable expiry counts as EXPIRED so the refresh path runs.
+  // Treating unknown expiry as fresh hands out a possibly-dead token, which surfaces
+  // as opaque 401s instead of a refresh.
+  if (!Number.isFinite(cred?.expiresAt)) return true
   return now + marginMs >= cred.expiresAt
 }
 
@@ -810,20 +854,45 @@ export async function refreshToken(cred, {
 /** Read-modify-write. Preserves every sibling key, notably mcpOAuth. Never throws. */
 export function writeBackCredentials(path, cred, {
   readFile = readFileSync, writeFile = writeFileSync,
+  rename = renameSync, remove = unlinkSync, uuid = randomUUID,
 } = {}) {
+  let raw = null
   try {
-    let doc = {}
-    try { doc = JSON.parse(readFile(path, 'utf8')) || {} } catch { doc = {} }
-    doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
-    const tmp = `${path}.${process.pid}.tmp`
-    writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600 })
-    try { renameSync(tmp, path) } catch { /* injected writeFile in tests */ }
-  } catch { /* ignore */ }
+    raw = readFile(path, 'utf8')
+  } catch (err) {
+    // ENOENT means there is no file yet and a fresh document is correct. ANY other read
+    // error means the file may exist holding sibling keys (mcpOAuth) we cannot see, so
+    // overwriting would destroy the user's other tokens. Abort instead: a missed refresh
+    // costs one slow path, a clobbered file costs the user their MCP credentials.
+    if (err?.code !== 'ENOENT') return
+  }
+
+  let doc = {}
+  if (raw != null) {
+    try { doc = JSON.parse(raw.replace(/^\uFEFF/, '')) }
+    catch { return } // corrupt file: abort rather than clobber siblings we cannot read
+    if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return
+  }
+
+  doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
+  try {
+    // flag 'wx' refuses to reuse a stale tmp file. writeFile applies `mode` only when it
+    // CREATES the file, so reusing a leftover 0644 tmp and renaming it over the target
+    // would leave the credentials world-readable.
+    writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600, flag: 'wx' })
+    rename(tmp, path)
+  } catch {
+    // best-effort cleanup: a failed rename would otherwise leave a cleartext refresh
+    // token sitting on disk forever
+    try { remove(tmp) } catch { /* tmp may never have been created */ }
+  }
 }
 
 /** Returns {token, error}. Never throws. */
 export async function getAccessToken({
   dir, now, fetchImpl = fetch, readFile = readFileSync, writeFile = writeFileSync,
+  rename = renameSync, remove = unlinkSync,
 }) {
   const path = credentialsPath(dir)
   const cred = readCredentials(path, readFile)
@@ -831,8 +900,14 @@ export async function getAccessToken({
   if (!isExpired(cred, now)) return { token: cred.accessToken, error: null }
 
   const refreshed = await refreshToken(cred, { fetchImpl })
-  if (!refreshed) return { token: null, error: 'refresh-failed' }
-  writeBackCredentials(path, refreshed, { readFile, writeFile })
+  if (!refreshed) {
+    // Refresh failed, but the existing token may still work. Handing it back gives the
+    // caller a chance; a 401 just makes the guard blind, which allows everything anyway.
+    return cred.accessToken
+      ? { token: cred.accessToken, error: 'refresh-failed-using-existing' }
+      : { token: null, error: 'refresh-failed' }
+  }
+  writeBackCredentials(path, refreshed, { readFile, writeFile, rename, remove })
   return { token: refreshed.accessToken, error: null }
 }
 ```
@@ -908,7 +983,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { normalise, fetchUsage, USAGE_URL } from '../usage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -1034,7 +1109,7 @@ export async function fetchUsage({ token, fetchImpl = fetch, timeoutMs = 3000 })
     })
     if (!res?.ok) return { raw: null, error: `http-${res?.status ?? 'unknown'}` }
     return { raw: await res.json(), error: null }
-  } catch (err) {
+  } catch (err) { // fail-open: a failed fetch becomes a reported error, never a throw into the hook
     return { raw: null, error: err?.name === 'AbortError' ? 'timeout' : 'network' }
   } finally { clearTimeout(timer) }
 }
@@ -1233,8 +1308,8 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
   lines.push('')
   const state = decision?.state ?? STATE.OK
   if (state === STATE.OK) lines.push('  decision: allow — below every soft threshold.')
-  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${decision.percent}% (soft ${decision.soft}). New fan-out would be declined.`)
-  else lines.push(`  decision: deny — ${decision.gauge} at ${decision.percent}% (ceiling ${decision.hard}).`)
+  else if (state === STATE.SOFT) lines.push(`  decision: advise — ${decision.gauge} at ${Math.round(decision.percent)}% (soft ${decision.soft}). New fan-out would be declined.`)
+  else lines.push(`  decision: deny — ${decision.gauge} at ${Math.round(decision.percent)}% (ceiling ${decision.hard}).`)
   return lines.join('\n')
 }
 ```
@@ -1243,9 +1318,9 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
 
 ```js
 #!/usr/bin/env node
-import { readdirSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
+import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 /** Copies every top-level .mjs from coreDir into targetLibDir. Returns copied filenames. */
 export function vendorCore(coreDir, targetLibDir) {
@@ -1256,6 +1331,15 @@ export function vendorCore(coreDir, targetLibDir) {
     if (statSync(join(coreDir, name)).isDirectory()) continue
     copyFileSync(join(coreDir, name), join(targetLibDir, name))
     copied.push(name)
+  }
+  // Prune modules core no longer has. Without this, a renamed or deleted module lingers
+  // in every plugin's lib/ forever and stays importable — a zombie silently diverging
+  // from the source of truth.
+  const wanted = new Set(copied)
+  for (const name of readdirSync(targetLibDir)) {
+    if (name.endsWith('.mjs') && !wanted.has(name)) {
+      rmSync(join(targetLibDir, name), { force: true })
+    }
   }
   return copied
 }
@@ -1348,7 +1432,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { parseHookInput, allowOutput, denyOutput, contextOutput } from '../hookio.mjs'
 
 const CORE = dirname(fileURLToPath(import.meta.url)).replace(/\/test$/, '')
@@ -1605,8 +1689,6 @@ Note the explicit `timeout` on every entry, the omitted `matcher` on the all-too
       { "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "Agent|Workflow",
-        "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] },
       { "hooks": [ { "type": "command", "timeout": 5, "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"" } ] }
     ]
   }
@@ -1625,7 +1707,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Install locally and observe a real session**
 
 ```bash
-claude plugin marketplace add /home/danja/Projects/TacosPlugins
+claude plugin marketplace add /path/to/TacosPlugins
 claude plugin install usage-guard@tacos-plugins
 ```
 
@@ -1708,7 +1790,8 @@ Expected: FAIL — cannot find module `../session.mjs`.
 - [ ] **Step 3: Write `session.mjs`**
 
 ```js
-import { writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 const ALIASES = {
@@ -1736,11 +1819,35 @@ export function parseBudgetArgs(argv) {
 }
 
 export function writeSessionConfig(dir, sessionId, patch, {
-  writeFile = writeFileSync, mkdir = mkdirSync,
+  writeFile = writeFileSync, mkdir = mkdirSync, readFile = readFileSync,
+  rename = renameSync, remove = unlinkSync, uuid = randomUUID,
 } = {}) {
   const path = sessionPath(dir, sessionId)
+
+  // MERGE, never replace. Each /budget call carries only the one setting the user just
+  // named, so overwriting would make `/budget weekly 70` silently discard the ceiling
+  // they set with `/budget 80` a moment earlier.
+  let existing = {}
+  try { existing = JSON.parse(readFile(path, 'utf8')) }
+  catch { existing = {} } // no prior file, or an unreadable one: start fresh rather than throw
+  if (existing === null || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
+
+  const merged = { ...existing, ...patch }
+  const gauges = { ...(existing.gauges || {}), ...(patch.gauges || {}) }
+  if (Object.keys(gauges).length > 0) merged.gauges = gauges
+
+  // Atomic write. A plain writeFile can leave a truncated session file if interrupted,
+  // and this file is rewritten on every /budget call — that truncation is exactly what
+  // readConfig then has to reason about.
   mkdir(join(dir, 'tacos', 'sessions'), { recursive: true })
-  writeFile(path, JSON.stringify(patch, null, 2), { mode: 0o600 })
+  const tmp = `${path}.${process.pid}.${uuid()}.tmp`
+  try {
+    writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600, flag: 'wx' })
+    rename(tmp, path)
+  } catch (err) {
+    try { remove(tmp) } catch { /* tmp may never have been created */ }
+    throw err // /budget must not report success for a write that did not land
+  }
 }
 
 export function gcSessions(dir, {
@@ -1931,6 +2038,92 @@ Ceiling denies every tool; the soft band denies only new fan-out so work
 already underway can finish. A blind guard still never denies."
 ```
 
+- [ ] **Step 7: Write the failing watch-only test**
+
+A gauge may opt out of enforcement while staying visible. Add to `packages/core/test/decide.test.mjs`:
+
+```js
+test('a gauge marked enforce:false never decides, however high', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: false } })
+  assert.equal(r.state, STATE.OK)
+  assert.equal(r.gauge, null)
+})
+
+test('omitting enforce leaves the gauge enforcing', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90 } })
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('enforce:true is equivalent to omitting it', () => {
+  const r = decide({ five_hour: { percent: 100, resetsAt: 'R' } },
+    { five_hour: { soft: 75, hard: 90, enforce: true } })
+  assert.equal(r.state, STATE.HARD)
+})
+```
+
+And to `packages/core/test/render.test.mjs`:
+
+```js
+test('a watch-only gauge still renders, marked as such', () => {
+  const gauges = { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges,
+    thresholds: { five_hour: { soft: 75, hard: 90, enforce: false } },
+    decision: { state: STATE.OK }, mode: 'enforce', blind: false,
+  })
+  assert.match(out, /five_hour/)
+  assert.match(out, /100/)
+  assert.match(out, /watch-only/i)
+})
+```
+
+- [ ] **Step 8: Run them to verify they fail**
+
+Run: `node --test packages/core/test/decide.test.mjs packages/core/test/render.test.mjs`
+Expected: the `enforce:false` test FAILS (it currently decides HARD), and the render test FAILS on `/watch-only/i`.
+
+- [ ] **Step 9: Implement the flag**
+
+In `packages/core/decide.mjs`, add one guard inside the loop, immediately after the `if (!limit) continue` line:
+
+```js
+    if (limit.enforce === false) continue // watch-only: still rendered, but never decides
+```
+
+In `packages/core/render.mjs`, inside the gauge loop, mark it. Where the gauge line is pushed, append a suffix:
+
+```js
+    const watch = limit.enforce === false ? '  (watch-only)' : ''
+```
+
+and add `${watch}` to the end of that pushed line, after the money segment.
+
+In `packages/core/config.mjs`, document the key above `DEFAULTS`:
+
+```js
+// Any gauge may carry `enforce: false` to become watch-only: it is still fetched and
+// still rendered with its percentage, but it can never produce a denial. Omitted or
+// `true` means the gauge enforces normally.
+```
+
+- [ ] **Step 10: Run to verify they pass**
+
+Run: `node scripts/release.mjs && npm test`
+Expected: all tests pass.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add packages/core/decide.mjs packages/core/render.mjs packages/core/config.mjs packages/core/test/decide.test.mjs packages/core/test/render.test.mjs
+git commit -m "feat(core): per-gauge watch-only flag
+
+A gauge with enforce:false is still fetched and still rendered with its
+percentage, but never produces a denial. Every gauge enforces by default;
+the flag is for people who want a gauge visible without acting on it."
+```
+
 ---
 
 ### Task 12: README and release checks
@@ -1951,7 +2144,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
