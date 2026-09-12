@@ -2,5 +2,8 @@
   "name": "usage-guard",
   "version": "0.1.1",
   "description": "Per-chat budgets enforced against your real account rate limits.",
-  "author": { "name": "tacodx" }
+  "author": {
+    "name": "tacodx"
+  },
+  "license": "MIT"
 }

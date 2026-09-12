@@ -2,5 +2,8 @@
   "name": "model-advisor",
   "version": "0.1.0",
   "description": "Tells you whether switching models would actually help your current rate limits.",
-  "author": { "name": "tacodx" }
+  "author": {
+    "name": "tacodx"
+  },
+  "license": "MIT"
 }
