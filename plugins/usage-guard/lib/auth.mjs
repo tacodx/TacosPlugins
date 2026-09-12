@@ -56,10 +56,23 @@ export async function refreshToken(cred, {
 
 /**
  * Read-modify-write. Preserves every sibling key, notably mcpOAuth. Never throws.
- * Refuses to write at all unless it can prove the target is either genuinely absent
- * (ENOENT) or a readable, parseable, object-shaped document — an unreadable or corrupt
- * file must never be silently replaced with just {claudeAiOauth}, since that would
- * destroy sibling keys we could not actually inspect.
+ * Returns true if the credential was actually persisted to disk, false otherwise —
+ * callers that report success (to the user, or implicitly to Claude Code's own next
+ * refresh, which depends on this file) must check this rather than assume it landed.
+ *
+ * Refuses to write at all unless it can prove the target is a readable, parseable,
+ * object-shaped document — an unreadable or corrupt file must never be silently
+ * replaced with just {claudeAiOauth}, since that would destroy sibling keys we could
+ * not actually inspect.
+ *
+ * ENOENT also refuses to write, and is NOT treated as "fresh start". This function is
+ * exported, but its only current caller (getAccessToken, below) reaches it after
+ * readCredentials has already read this exact path successfully — so ENOENT here can
+ * only mean the file was deleted between that read and this write-back, never "no
+ * credentials file has ever existed". Writing a fresh {claudeAiOauth}-only document in
+ * that window would destroy mcpOAuth and any other sibling keys the deleted file held.
+ * A future caller without that precondition would need its own "create if missing"
+ * path — this function does not have the guarantee to assume one.
  */
 export function writeBackCredentials(path, cred, {
   readFile = readFileSync, writeFile = writeFileSync, rename = renameSync,
@@ -68,19 +81,13 @@ export function writeBackCredentials(path, cred, {
   let raw
   try {
     raw = readFile(path, 'utf8')
-  } catch (err) {
-    if (err?.code !== 'ENOENT') return // unreadable (EACCES, EMFILE, a read racing another writer, etc.): never overwrite what we couldn't confirm is safe to replace
-    raw = null // file genuinely does not exist yet; starting from an empty doc is safe
-  }
+  } catch { return false } // ENOENT (deleted between read and write-back) or otherwise unreadable: never overwrite what we couldn't confirm is safe to replace
 
-  let doc = {}
-  if (raw !== null) {
-    let parsed
-    try { parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) } // strip a UTF-8 BOM before parsing; some tools write one
-    catch { return } // existing file is corrupt/unparseable: refuse to blindly overwrite it
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return // not a credentials-document shape: refuse to overwrite
-    doc = parsed
-  }
+  let parsed
+  try { parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) } // strip a UTF-8 BOM before parsing; some tools write one
+  catch { return false } // existing file is corrupt/unparseable: refuse to blindly overwrite it
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false // not a credentials-document shape: refuse to overwrite
+  const doc = parsed
 
   doc.claudeAiOauth = { ...(doc.claudeAiOauth || {}), ...cred }
   const tmp = `${path}.${process.pid}.${uuid()}.tmp`
@@ -89,8 +96,10 @@ export function writeBackCredentials(path, cred, {
     // reusing an existing (possibly world-readable) leftover tmp file would silently keep its old mode.
     writeFile(tmp, JSON.stringify(doc, null, 2), { mode: 0o600, flag: 'wx' })
     rename(tmp, path)
+    return true
   } catch { // fail-open: a credential we cannot persist is a slow path, not a broken session
     try { remove(tmp) } catch { /* tmp may never have been created (writeFile itself failed); nothing to clean up */ }
+    return false
   }
 }
 
@@ -107,6 +116,11 @@ export async function getAccessToken({
   const refreshed = await refreshToken(cred, { fetchImpl })
   // a dead token that still happens to work beats returning null and guaranteeing failure
   if (!refreshed) return { token: cred.accessToken, error: 'refresh-failed-using-existing' }
-  writeBackCredentials(path, refreshed, { readFile, writeFile, rename, remove })
+  const persisted = writeBackCredentials(path, refreshed, { readFile, writeFile, rename, remove })
+  // The refresh itself succeeded — the server has already rotated and invalidated the
+  // old refresh token — so the fresh access token is still good to use this call. But
+  // if the write-back did not land, the on-disk refresh token is now dead: Claude
+  // Code's own next refresh will fail with no signal unless this error surfaces.
+  if (!persisted) return { token: refreshed.accessToken, error: 'refresh-not-persisted' }
   return { token: refreshed.accessToken, error: null }
 }

@@ -103,22 +103,24 @@ test('write-back writes an atomic, freshly-named tmp file then renames it into p
 
 test('an unreadable credentials file (EACCES) is never overwritten', () => {
   let writeCalled = false
-  writeBackCredentials('/p', cred, {
+  const result = writeBackCredentials('/p', cred, {
     readFile: () => { const err = new Error('denied'); err.code = 'EACCES'; throw err },
     writeFile: () => { writeCalled = true },
     rename: () => {},
   })
   assert.equal(writeCalled, false)
+  assert.equal(result, false, 'writeBackCredentials must report the write did not happen')
 })
 
 test('a corrupt/unparseable credentials file is never overwritten', () => {
   let writeCalled = false
-  writeBackCredentials('/p', cred, {
+  const result = writeBackCredentials('/p', cred, {
     readFile: () => '﻿not valid json even after stripping the bom',
     writeFile: () => { writeCalled = true },
     rename: () => {},
   })
   assert.equal(writeCalled, false)
+  assert.equal(result, false)
 })
 
 test('a BOM-prefixed but validly-formatted credentials file still preserves siblings', () => {
@@ -133,36 +135,47 @@ test('a BOM-prefixed but validly-formatted credentials file still preserves sibl
   assert.equal(written.claudeAiOauth.accessToken, 'new')
 })
 
-test('a genuinely missing credentials file (ENOENT) is created fresh', () => {
-  let written
-  writeBackCredentials('/p', cred, {
+test('a genuinely missing credentials file (ENOENT) is never written — its only caller reaches it after a successful read of that exact path, so ENOENT here means "deleted mid-flight", never "fresh start"', () => {
+  let writeCalled = false
+  const result = writeBackCredentials('/p', cred, {
     readFile: () => { const err = new Error('missing'); err.code = 'ENOENT'; throw err },
-    writeFile: (_p, body) => { written = JSON.parse(body) },
+    writeFile: () => { writeCalled = true },
     rename: () => {},
   })
-  assert.ok(written.claudeAiOauth)
-  assert.equal(written.claudeAiOauth.accessToken, cred.accessToken)
+  assert.equal(writeCalled, false, 'writing a fresh {claudeAiOauth}-only doc here would destroy mcpOAuth if the file reappears')
+  assert.equal(result, false)
 })
 
 test('a credentials file that parses to a JSON array is never overwritten', () => {
   let writeCalled = false
-  writeBackCredentials('/p', cred, {
+  const result = writeBackCredentials('/p', cred, {
     readFile: () => JSON.stringify([1, 2, 3]),
     writeFile: () => { writeCalled = true },
     rename: () => {},
   })
   assert.equal(writeCalled, false)
+  assert.equal(result, false)
 })
 
-test('a failed rename cleans up the tmp file rather than leaving it behind', () => {
+test('a failed rename cleans up the tmp file rather than leaving it behind, and reports failure', () => {
   let removedPath, writtenTmpPath
-  writeBackCredentials('/p', cred, {
+  const result = writeBackCredentials('/p', cred, {
     readFile: () => JSON.stringify({ claudeAiOauth: cred }),
     writeFile: (p) => { writtenTmpPath = p },
     rename: () => { throw new Error('rename failed') },
     remove: (p) => { removedPath = p },
   })
   assert.equal(removedPath, writtenTmpPath)
+  assert.equal(result, false)
+})
+
+test('a successful write-back reports true', () => {
+  const result = writeBackCredentials('/p', cred, {
+    readFile: () => JSON.stringify({ claudeAiOauth: cred }),
+    writeFile: () => {},
+    rename: () => {},
+  })
+  assert.equal(result, true)
 })
 
 test('getAccessToken refreshes an expired token and writes it back through every injected seam', async () => {
@@ -185,6 +198,20 @@ test('getAccessToken refreshes an expired token and writes it back through every
   assert.equal(renamedTo, credentialsPath(dir), 'getAccessToken must forward its own rename, not silently fall back to the real renameSync')
   assert.ok(renamedFrom.endsWith('.tmp'))
   assert.equal(removeCalled, false, 'remove is only invoked on a failed rename; this rename succeeds')
+})
+
+test('a successful refresh whose write-back fails still returns the fresh token, but flags refresh-not-persisted', async () => {
+  const result = await getAccessToken({
+    dir: '/home/test/.claude',
+    now: 2_000_000,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ access_token: 'new-token', refresh_token: 'new-refresh', expires_in: 3600 }) }),
+    readFile: () => JSON.stringify({ claudeAiOauth: cred }),
+    writeFile: () => { throw new Error('disk full') },
+    rename: () => { throw new Error('must not be reached: writeFile already failed') },
+    remove: () => {},
+  })
+  assert.equal(result.token, 'new-token', 'the refreshed token is still good to use even though it could not be saved')
+  assert.equal(result.error, 'refresh-not-persisted')
 })
 
 test('getAccessToken falls back to the existing token when refresh fails, rather than going blind', async () => {

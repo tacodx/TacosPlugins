@@ -11,7 +11,7 @@ export function bar(percent, width = 14) {
   return '='.repeat(filled) + '.'.repeat(width - filled)
 }
 
-export function renderStatus({ gauges, thresholds, decision, mode, blind, reason, configUnreadable }) {
+export function renderStatus({ gauges, thresholds, decision, mode, blind, reason, configUnreadable, warning }) {
   const lines = [`usage-guard  [mode: ${mode}]`, '']
   if (configUnreadable) {
     // readConfig only ever degrades to dry-run when NO readable layer named a mode.
@@ -20,6 +20,14 @@ export function renderStatus({ gauges, thresholds, decision, mode, blind, reason
     // message must never claim passivity except in the one case it's actually true.
     lines.push(`  part of the config could not be read. Mode in effect: ${mode}.`)
     if (mode === 'dry-run') lines.push('  the guard is observing only, not enforcing.')
+    lines.push('')
+  }
+  if (warning === 'refresh-not-persisted') {
+    // The refresh itself succeeded (this call still has a good token), but the rotated
+    // credential could not be written back to disk. The on-disk refresh token is now
+    // dead, so Claude Code's own next refresh will fail with no other warning.
+    lines.push('  warning: a token refresh succeeded but could not be saved to disk.')
+    lines.push('  the credential rotation did not reach disk; Claude Code may need re-authentication.')
     lines.push('')
   }
   if (blind || !gauges) {

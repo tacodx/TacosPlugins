@@ -79,6 +79,22 @@ test('an unreadable config that preserved an explicit "enforce" must not claim t
   assert.doesNotMatch(out, /not enforcing/i)
 })
 
+test('a refresh-not-persisted warning renders even though the gauges are otherwise healthy', () => {
+  const gauges = { five_hour: { percent: 10, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({
+    gauges, thresholds: DEFAULTS.gauges, decision: { state: STATE.OK },
+    mode: 'enforce', blind: false, warning: 'refresh-not-persisted',
+  })
+  assert.match(out, /could not be saved to disk/i)
+  assert.match(out, /re-authentication/i)
+})
+
+test('no warning line appears when warning is absent', () => {
+  const gauges = { five_hour: { percent: 10, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
+  const out = renderStatus({ gauges, thresholds: DEFAULTS.gauges, decision: { state: STATE.OK }, mode: 'enforce', blind: false })
+  assert.doesNotMatch(out, /could not be saved to disk/i)
+})
+
 test('a watch-only gauge still renders, marked as such', () => {
   const gauges = { five_hour: { percent: 100, resetsAt: 'R' }, seven_day: null, extra_usage: null, scoped: [] }
   const out = renderStatus({

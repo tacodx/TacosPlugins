@@ -43,8 +43,8 @@ if (isMain) {
 
   if (rest.length === 0) {
     const cfg = readConfig({ dir, sessionId, readFile: readFileSync })
-    const { gauges, blind, reason } = await getGauges({ dir, now: Date.now() })
-    console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision: blind ? null : decide(gauges, cfg.gauges), mode: cfg.mode, blind, reason, configUnreadable: cfg.configUnreadable }))
+    const { gauges, blind, reason, warning } = await getGauges({ dir, now: Date.now() })
+    console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision: blind ? null : decide(gauges, cfg.gauges), mode: cfg.mode, blind, reason, configUnreadable: cfg.configUnreadable, warning }))
     process.exit(0)
   }
 

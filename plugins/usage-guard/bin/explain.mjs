@@ -13,6 +13,6 @@ const { renderStatus } = await load('render.mjs')
 const dir = configDir(process.env)
 const sessionId = process.argv[2] || null
 const cfg = readConfig({ dir, sessionId, readFile: readFileSync })
-const { gauges, blind, reason } = await getGauges({ dir, now: Date.now() })
+const { gauges, blind, reason, warning } = await getGauges({ dir, now: Date.now() })
 const decision = blind ? null : decide(gauges, cfg.gauges)
-console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision, mode: cfg.mode, blind, reason, configUnreadable: cfg.configUnreadable }))
+console.log(renderStatus({ gauges, thresholds: cfg.gauges, decision, mode: cfg.mode, blind, reason, configUnreadable: cfg.configUnreadable, warning }))

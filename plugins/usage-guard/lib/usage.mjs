@@ -97,8 +97,11 @@ export async function fetchUsage({ token, fetchImpl = fetch, timeoutMs = 3000 })
 }
 
 /**
- * Cache-first. Returns {gauges, blind, reason, fresh}.
+ * Cache-first. Returns {gauges, blind, reason, fresh, warning}.
  * blind=true means we have no usable data — callers MUST allow everything.
+ * warning is set independently of blind/reason — e.g. 'refresh-not-persisted' when a
+ * token refresh succeeded (so this call still has a good token) but its write-back to
+ * disk failed, which callers should still surface even though nothing here is blind.
  */
 export async function getGauges({
   dir, now, fetchImpl = fetch, ttlMs = 60_000, maxStaleMs = 900_000, timeoutMs = 3000,
@@ -106,22 +109,26 @@ export async function getGauges({
   const cachePath = join(dir, 'tacos', 'usage-cache.json')
   const failurePath = failureCachePath(dir)
   const cached = readCache(cachePath, { now, ttlMs, maxStaleMs })
-  if (cached?.fresh) return { gauges: cached.data, blind: false, reason: null, fresh: true }
+  if (cached?.fresh) return { gauges: cached.data, blind: false, reason: null, fresh: true, warning: null }
 
   // A recent failure is still backing off: skip credential read and network entirely,
   // and answer exactly as a fresh failure would (stale cache if any, else blind).
   const failure = activeFailure(failurePath, now)
   if (failure) {
-    if (cached) return { gauges: cached.data, blind: false, reason: failure.reason, fresh: false }
-    return { gauges: null, blind: true, reason: failure.reason, fresh: false }
+    if (cached) return { gauges: cached.data, blind: false, reason: failure.reason, fresh: false, warning: null }
+    return { gauges: null, blind: true, reason: failure.reason, fresh: false, warning: null }
   }
 
   const { token, error: authError } = await getAccessToken({ dir, now, fetchImpl })
   if (!token) {
     recordFailure(failurePath, now, authError)
-    if (cached) return { gauges: cached.data, blind: false, reason: authError, fresh: false }
-    return { gauges: null, blind: true, reason: authError, fresh: false }
+    if (cached) return { gauges: cached.data, blind: false, reason: authError, fresh: false, warning: null }
+    return { gauges: null, blind: true, reason: authError, fresh: false, warning: null }
   }
+  // A token was obtained even when authError is 'refresh-not-persisted' (the refreshed
+  // access token is still good to use) — carry that warning forward regardless of how
+  // the rest of this call turns out, rather than dropping it now that token is truthy.
+  const warning = authError === 'refresh-not-persisted' ? authError : null
 
   let result = { raw: null, error: 'skipped' }
   await withLock(`${cachePath}.lock`, async () => {
@@ -130,10 +137,10 @@ export async function getGauges({
 
   if (result.error) {
     recordFailure(failurePath, now, result.error)
-    if (cached) return { gauges: cached.data, blind: false, reason: result.error, fresh: false }
-    return { gauges: null, blind: true, reason: result.error, fresh: false }
+    if (cached) return { gauges: cached.data, blind: false, reason: result.error, fresh: false, warning }
+    return { gauges: null, blind: true, reason: result.error, fresh: false, warning }
   }
   const gauges = normalise(result.raw)
   writeCache(cachePath, gauges, { now })
-  return { gauges, blind: false, reason: null, fresh: true }
+  return { gauges, blind: false, reason: null, fresh: true, warning }
 }
