@@ -68,13 +68,19 @@ At the hard ceiling the guard denies **every** `PreToolUse` tool call in
 enforce mode. `/budget` itself runs as a `Bash` call (`bin/budget.mjs`), so
 without special handling `/budget off` — the one command that turns the
 ceiling off — would be denied by the ceiling it exists to lift. The guard
-recognises its own budget CLI (narrowly: a `Bash` command containing both
-`usage-guard` and `bin/budget.mjs`) and always lets it through, so `/budget
-off` and `/budget on` remain reachable no matter how high any gauge reads.
+recognises its own budget CLI by a strict, anchored match against the exact
+command shape `commands/budget.md` generates — `node "<path ending in
+usage-guard/.../bin/budget.mjs>" "<session-id>" [args...]` — and admits no
+shell metacharacters anywhere in it (no `;`, `|`, `&`, `$`, backticks,
+redirection, or comments). A command that merely *mentions* the plugin name
+or the script path — in a comment, chained with `;` or `&&`, or via `cat`
+or `echo` — does not match and is denied like anything else at the ceiling.
 
-If that recognition ever fails to match — a renamed plugin directory, an
-unusual invocation — you are not locked out. Two out-of-band ways to turn
-the guard off without going through a tool call at all:
+That match is still just a pattern over one string, evaluated in-process by
+the same guard it exists to escape — it is not a proof of security, and it
+is not the thing to depend on if you ever need to be certain the guard is
+off. That certainty comes from the two out-of-band paths below, which don't
+go through a tool call, a hook, or this plugin's own code at all:
 
 - Delete the current chat's session file:
   `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/sessions/<session-id>.json`
@@ -213,6 +219,16 @@ block your own tool calls.
   API response** and ship disabled by default. They are rendered as
   informational percentages when your account reports them, but do not
   currently drive any deny decision.
+
+- **A gauge's reset time is compared against your local system clock, not
+  Anthropic's.** A gauge already past its own `resetsAt` is treated as
+  rolled over and skipped rather than enforced (see above). That comparison
+  uses `Date.now()` on the machine running Claude Code. If your local clock
+  runs fast relative to Anthropic's servers, a gauge can look already-reset
+  before the window has actually rolled over server-side, and enforcement
+  on it under-enforces for the length of that skew. A slow local clock has
+  the opposite, safer effect: it delays treating a genuinely reset gauge as
+  reset. Keep your system clock synced (NTP) if this matters to you.
 
 - **Tested against Claude Code 2.1.220 only.** The hook payload shape, the
   matcher semantics for `hooks.json`, and the tool names that actually gate
