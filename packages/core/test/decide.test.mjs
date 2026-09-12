@@ -144,6 +144,42 @@ test('an unparseable resetsAt still evaluates the gauge normally, never disablin
   assert.equal(r.state, STATE.HARD)
 })
 
+test('an absent resetsAt (undefined) still evaluates the gauge normally, never disabling it', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: undefined } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD)
+})
+
+test('resetsAt: 0 does not resolve to the Unix epoch and disable the gauge', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: 0 } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD, 'resetsAt: 0 must never be treated as an already-passed reset')
+})
+
+test('resetsAt: false does not resolve to the Unix epoch and disable the gauge', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: false } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD, 'resetsAt: false must never be treated as an already-passed reset')
+})
+
+test('resetsAt: empty string still evaluates the gauge normally, never disabling it', () => {
+  const r = decide(
+    { five_hour: { percent: 100, resetsAt: '' } },
+    { five_hour: { soft: 75, hard: 90 } },
+    NOW,
+  )
+  assert.equal(r.state, STATE.HARD)
+})
+
 test('decide defaults now to the real clock when omitted', () => {
   const farFuture = new Date(Date.now() + 3_600_000).toISOString()
   const r = decide({ five_hour: { percent: 100, resetsAt: farFuture } }, { five_hour: { soft: 75, hard: 90 } })

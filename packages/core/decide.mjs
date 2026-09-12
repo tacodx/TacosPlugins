@@ -7,15 +7,22 @@ const NONE = Object.freeze({
 })
 
 /**
- * True only when resetsAt parses to a real instant that has already passed. A missing
- * or unparseable resetsAt must never disable a gauge — that would be worse than the bug
- * this guards against, silencing enforcement on any gauge the account simply didn't
- * report a reset time for.
+ * True only when resetsAt parses to a real, positive instant that has already passed.
+ * A missing or unparseable resetsAt must never disable a gauge — that would be worse
+ * than the bug this guards against, silencing enforcement on any gauge the account
+ * simply didn't report a reset time for.
+ *
+ * Only strings and numbers are accepted as timestamp representations (an ISO string or
+ * epoch millis). Everything else — including booleans — is rejected outright: `new
+ * Date(false)` and `new Date(0)` both resolve to the Unix epoch, which is always
+ * `<= now`, so treating `resetsAt: 0` or `resetsAt: false` as "parses to a time" would
+ * silently disable the gauge every time. Requiring `t > 0` on top closes that for any
+ * other falsy-but-parseable input (`''`, `NaN`) without special-casing each one.
  */
 function hasResetInPast(resetsAt, now) {
-  if (resetsAt === null || resetsAt === undefined) return false
+  if (typeof resetsAt !== 'string' && typeof resetsAt !== 'number') return false
   const t = new Date(resetsAt).getTime()
-  return !Number.isNaN(t) && t <= now
+  return Number.isFinite(t) && t > 0 && t <= now
 }
 
 /**
