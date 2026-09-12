@@ -199,6 +199,32 @@ test('wantRaw on a live fetch returns the raw limits[] payload and persists it t
   }
 })
 
+// The raw-cache write on a successful fetch is deliberately unconditional (not gated on
+// wantRaw) precisely so this scenario works: usage-guard and model-advisor both hook
+// UserPromptSubmit and share this same cache directory, and whichever one's hook fires
+// first — here, usage-guard's plain call, which never asks for raw — still leaves a raw
+// cache the other can read. Without the unconditional write, model-advisor would see
+// raw: null for a full TTL window every time usage-guard's hook wins the race, which is
+// the common case whenever both plugins are installed.
+test('a plain getGauges() fetch feeds a later wantRaw:true call within the same TTL, without fetching twice', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  let fetchCount = 0
+  const fetchImpl = async () => { fetchCount++; return { ok: true, json: async () => fixture('usage-max') } }
+  try {
+    const first = await getGauges({ dir, now, fetchImpl }) // usage-guard's own call: no wantRaw
+    assert.equal(Object.hasOwn(first, 'raw'), false, 'sanity check: this call never asked for raw')
+
+    const second = await getGauges({ dir, now: now + 1, wantRaw: true, fetchImpl }) // model-advisor's call, moments later
+
+    assert.equal(fetchCount, 1, 'the second call must reuse the raw cache the first call left, not fetch again')
+    assert.ok(Array.isArray(second.raw?.limits))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('wantRaw on a fresh gauge-cache hit reads raw back from its own cache file, without touching the network', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
   const now = Date.now()

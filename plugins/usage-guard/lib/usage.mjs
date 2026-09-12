@@ -170,10 +170,16 @@ export async function getGauges({
   }
   const gauges = normalise(result.raw)
   writeCache(cachePath, gauges, { now })
-  // Written unconditionally (not just when wantRaw), mirroring the gauge cache's own
-  // lifecycle: both come from the same network round trip, so whichever plugin's hook
-  // happens to fetch first leaves a raw cache the other can reuse within the same TTL
-  // instead of forcing a second live fetch a few hook events later.
+  // DELIBERATELY unconditional — do NOT gate this behind `wantRaw`. usage-guard and
+  // model-advisor both hook UserPromptSubmit and share this same cache directory, so
+  // either one's plain (non-wantRaw) call may win the race and be the one that actually
+  // performs this live fetch. Both come from the same network round trip, so the raw
+  // payload is free to persist here regardless of who asked. Gating this write on
+  // `wantRaw` would mean model-advisor gets `raw: null` for an entire TTL window whenever
+  // usage-guard's hook fetches first — the common case whenever both plugins are
+  // installed — silently starving model-advisor instead of merely costing one extra
+  // fetch the first time either plugin needs raw data. See
+  // usage.test.mjs: "a plain getGauges() fetch feeds a later wantRaw:true call".
   writeCache(rawPath, result.raw, { now })
   return attach({ gauges, blind: false, reason: null, fresh: true, warning }, result.raw)
 }

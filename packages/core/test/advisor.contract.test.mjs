@@ -1,12 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { adviseForHook } from '../../../plugins/model-advisor/hooks/advisor.mjs'
 import { normaliseLimits } from '../buckets.mjs'
+import { writeCache } from '../cache.mjs'
+import { rawCachePath } from '../usage.mjs'
 
 const ADVISOR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'plugins', 'model-advisor', 'hooks', 'advisor.mjs')
 
@@ -61,6 +63,10 @@ test('never claims one model costs more than another', () => {
 // dir (never the user's real ~/.claude) so it stays blind and offline — no credentials
 // file means getAccessToken returns synchronously with no network call — and checks the
 // actual stdout a real hook run produces.
+//
+// This ONLY exercises advisor.mjs's ALLOW branch: an empty config dir has no buckets, so
+// adviseForHook returns 'allow' and the wiring's `action === 'context' ? ... : allowOutput()`
+// ternary never evaluates its 'context' side. See the test below for that branch.
 test('the real hook process never emits a permissionDecision — this plugin can never deny', () => {
   const dir = mkdtempSync(join(tmpdir(), 'model-advisor-test-'))
   try {
@@ -70,6 +76,44 @@ test('the real hook process never emits a permissionDecision — this plugin can
       env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
     })
     assert.doesNotMatch(out, /permissionDecision/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// The test above proves nothing about the 'context' side of the wiring ternary, since it
+// never gets taken. This drives the real process down THAT branch instead, by fabricating
+// a fresh usage-cache.json + usage-raw.json (so getGauges needs neither real credentials
+// nor a real network call — same technique usage-guard's own tests use to exercise its
+// deny path against a scratch config dir) and a transcript whose most recent row names a
+// model the fabricated bucket is scoped to. This is the check that actually pins property
+// 1 end to end: it would fail if the 'context' branch were ever wired to denyOutput.
+test('the real hook process reaches the context branch and still never emits a permissionDecision', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'model-advisor-test-'))
+  try {
+    const now = Date.now()
+    writeCache(join(dir, 'tacos', 'usage-cache.json'),
+      { five_hour: null, seven_day: null, extra_usage: null, scoped: [] }, { now })
+    writeCache(rawCachePath(dir), {
+      limits: [
+        { kind: 'weekly_scoped', group: 'weekly', percent: 92, is_active: true,
+          resets_at: '2026-09-19T00:00:00Z', scope: { model: { display_name: 'Fable' } } },
+      ],
+    }, { now })
+    const transcriptPath = join(dir, 'transcript.jsonl')
+    writeFileSync(transcriptPath, `${JSON.stringify({ message: { model: 'claude-fable-5-1' } })}\n`)
+
+    const out = execFileSync('node', [ADVISOR], {
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's', transcript_path: transcriptPath }),
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+    })
+
+    assert.doesNotMatch(out, /permissionDecision/)
+    const parsed = JSON.parse(out)
+    assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit')
+    assert.match(parsed.hookSpecificOutput.additionalContext, /Fable/)
+    assert.match(parsed.hookSpecificOutput.additionalContext, /92/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
