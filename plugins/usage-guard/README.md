@@ -62,6 +62,25 @@ The advisory ("soft") threshold set this way is always 15 points below the
 ceiling you gave — *except* it is never set below 1%. `/budget 10` sets the
 ceiling to 10% and the soft threshold to 1%, not -5%.
 
+### `/budget off` at the hard ceiling
+
+At the hard ceiling the guard denies **every** `PreToolUse` tool call in
+enforce mode. `/budget` itself runs as a `Bash` call (`bin/budget.mjs`), so
+without special handling `/budget off` — the one command that turns the
+ceiling off — would be denied by the ceiling it exists to lift. The guard
+recognises its own budget CLI (narrowly: a `Bash` command containing both
+`usage-guard` and `bin/budget.mjs`) and always lets it through, so `/budget
+off` and `/budget on` remain reachable no matter how high any gauge reads.
+
+If that recognition ever fails to match — a renamed plugin directory, an
+unusual invocation — you are not locked out. Two out-of-band ways to turn
+the guard off without going through a tool call at all:
+
+- Delete the current chat's session file:
+  `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/sessions/<session-id>.json`
+- Set `"mode": "off"` in
+  `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/config.json` (account-wide, every chat)
+
 ## Config file and defaults
 
 Account-wide defaults live in a JSON file you create by hand at

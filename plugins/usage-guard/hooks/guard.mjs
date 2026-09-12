@@ -11,6 +11,19 @@ const { run, allowOutput, denyOutput, contextOutput } = await load('hookio.mjs')
 
 const FANOUT = new Set(['Agent', 'Workflow', 'Task'])
 
+/**
+ * True only for the guard's own /budget CLI invoked as a Bash tool call. At the hard
+ * ceiling every PreToolUse is denied — including the Bash call commands/budget.md uses
+ * to run bin/budget.mjs — so without this exemption a user has no way to reach
+ * `/budget off` once the ceiling is hit; the off-switch would be denied by the thing
+ * it turns off. Deliberately narrow (both substrings must appear in the Bash command)
+ * so this can never become a general bypass for arbitrary tool calls.
+ */
+function isBudgetCommand(input) {
+  const command = input.tool_name === 'Bash' ? input.tool_input?.command : null
+  return typeof command === 'string' && command.includes('usage-guard') && command.includes('bin/budget.mjs')
+}
+
 const advisory = (d) => [
   `Usage budget: ${d.gauge} is at ${Math.round(d.percent)}% (soft ${d.soft}, ceiling ${d.hard}).`,
   'Finish the current task properly. Do NOT start new large-scope work.',
@@ -27,6 +40,8 @@ export function decideForHook({ input, cfg, gauges, blind }) {
 
   const event = input.hook_event_name
   const enforcing = cfg.mode === 'enforce'
+
+  if (event === 'PreToolUse' && isBudgetCommand(input)) return { action: 'allow', text: null }
 
   if (d.state === STATE.HARD && enforcing && event === 'PreToolUse') {
     return { action: 'deny', text: `Usage ceiling reached: ${d.gauge} at ${Math.round(d.percent)}% (ceiling ${d.hard}). Winding down; nothing new will start.` }

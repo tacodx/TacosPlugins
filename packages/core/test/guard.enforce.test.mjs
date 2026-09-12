@@ -30,3 +30,17 @@ test('a blind guard never denies even in enforce mode', () => {
   const r = decideForHook({ input: { hook_event_name: 'PreToolUse', tool_name: 'Agent' }, cfg, gauges: null, blind: true })
   assert.equal(r.action, 'allow')
 })
+
+test('at 100% in enforce mode, the budget CLI escapes the ceiling while an unrelated Bash call is still denied', () => {
+  const budgetInput = {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'node "/home/user/.claude/plugins/usage-guard/bin/budget.mjs" "$CLAUDE_SESSION_ID" off' },
+  }
+  const escaped = decideForHook({ input: budgetInput, cfg, gauges: at(100), blind: false })
+  assert.equal(escaped.action, 'allow', '/budget off must always be reachable, even at the hard ceiling')
+
+  const unrelatedInput = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo hi' } }
+  const denied = decideForHook({ input: unrelatedInput, cfg, gauges: at(100), blind: false })
+  assert.equal(denied.action, 'deny', 'the exemption must not become a general bypass for other Bash calls')
+})
