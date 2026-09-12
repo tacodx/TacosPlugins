@@ -175,12 +175,14 @@ test('a multi-word bucket model matches an api id carrying every token', () => {
   assert.equal(switchingHelps(scoped, 'claude-opus-5').helps, true)
 })
 
-test('two model-scoped buckets tied at the maximum give the same answer regardless of array order', () => {
-  // is_active is deliberately IDENTICAL on both buckets. binding()'s active-tiebreak
-  // would otherwise resolve the tie by itself regardless of array order, which made an
-  // earlier version of this test pass even against the pre-fix, order-dependent
-  // implementation — the tie has to fall through to input order for this test to mean
-  // anything.
+test('a bucket scoped to a DIFFERENT model tied at the same percentage is irrelevant, regardless of array order', () => {
+  // Corrected semantics (see the applicability fix): opusBucket cannot constrain a
+  // Fable session at all, tied percentage or not — it is filtered out of consideration
+  // entirely, leaving fableBucket as the sole applicable, and therefore binding, bucket.
+  // Switching away from Fable moves you off Fable's own ceiling, so this is `true` now —
+  // an earlier version of this test asserted `false` for both orders, which was exactly
+  // the bug in findings 1/2: it let a same-percentage bucket scoped to a model we are
+  // NOT running decide the answer for a session it cannot possibly bind.
   const opusBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: true,
     scope: { model: { display_name: 'Opus' } } }
   const fableBucket = { kind: 'weekly_scoped', group: 'weekly', percent: 77, is_active: true,
@@ -188,8 +190,11 @@ test('two model-scoped buckets tied at the maximum give the same answer regardle
 
   const forward = switchingHelps(normaliseLimits({ limits: [opusBucket, fableBucket] }), 'Fable')
   const reversed = switchingHelps(normaliseLimits({ limits: [fableBucket, opusBucket] }), 'Fable')
-  assert.equal(forward.helps, false)
-  assert.equal(reversed.helps, false)
+  assert.equal(forward.helps, true)
+  assert.equal(reversed.helps, true)
+  assert.equal(forward.bucket.model, 'Fable')
+  assert.equal(reversed.bucket.model, 'Fable')
+  assert.match(forward.reason, /Fable/)
 })
 
 test('a shared bucket tied at the maximum with a current-model bucket means switching does not help', () => {
@@ -198,6 +203,53 @@ test('a shared bucket tied at the maximum with a current-model bucket means swit
     scope: { model: { display_name: 'Fable' } } }
   const r = switchingHelps(normaliseLimits({ limits: [shared, scoped] }), 'Fable')
   assert.equal(r.helps, false)
+  assert.equal(r.bucket.kind, 'weekly_all')
+  assert.match(r.reason, /weekly_all/)
+})
+
+// --- Findings 1 & 2: the renderer and the reasoner must agree on which bucket binds ---
+
+test('an Opus session is not bound by a Fable-scoped bucket even when it is the highest percentage reported', () => {
+  // The repo owner's own account shape: session 13%, weekly_all 40% (both shared), and a
+  // Fable-scoped bucket at 90%. An Opus session is never constrained by Fable's own
+  // allowance — the real constraint is weekly_all at 40% — so the returned `bucket` must
+  // be weekly_all, and the sentence must name it, not the higher-but-irrelevant 90%.
+  const buckets = normaliseLimits({ limits: [
+    { kind: 'session', group: 'session', percent: 13, is_active: false, scope: null },
+    { kind: 'weekly_all', group: 'weekly', percent: 40, is_active: true, scope: null },
+    { kind: 'weekly_scoped', group: 'weekly', percent: 90, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  const r = switchingHelps(buckets, 'claude-opus-5')
+  assert.equal(r.helps, false)
+  assert.equal(r.bucket.kind, 'weekly_all')
+  assert.match(r.reason, /weekly_all/)
+  assert.doesNotMatch(r.reason, /90/)
+})
+
+test('a scoped and a shared bucket tied at 61% mark and name the SAME bucket — no self-contradiction', () => {
+  const scoped = { kind: 'weekly_scoped', group: 'weekly', percent: 61, is_active: false,
+    scope: { model: { display_name: 'Fable' } } }
+  const shared = { kind: 'weekly_all', group: 'weekly', percent: 61, is_active: true, scope: null }
+  const r = switchingHelps(normaliseLimits({ limits: [scoped, shared] }), 'claude-fable-5-1')
+  // The shared bucket is the one that actually blocks switching (it draws on every
+  // model), so it must be both the marked bucket AND the one the sentence names — never
+  // one saying weekly_scoped while the other says weekly_all.
+  assert.equal(r.helps, false)
+  assert.equal(r.bucket.kind, 'weekly_all')
+  assert.match(r.reason, /weekly_all/)
+  assert.doesNotMatch(r.reason, /weekly_scoped/)
+})
+
+test('a bucket scoped to another model is never returned as the binding bucket, even at the global max', () => {
+  const buckets = normaliseLimits({ limits: [
+    { kind: 'weekly_all', group: 'weekly', percent: 5, is_active: true, scope: null },
+    { kind: 'weekly_scoped', group: 'weekly', percent: 99, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  const r = switchingHelps(buckets, 'claude-opus-5')
+  assert.notEqual(r.bucket?.model, 'Fable')
+  assert.equal(r.bucket.kind, 'weekly_all')
 })
 
 test('a versioned bucket name does not match a different point release by token subset (version confusion)', () => {

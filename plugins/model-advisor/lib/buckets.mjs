@@ -18,7 +18,18 @@ export function normaliseLimits(raw) {
     }))
 }
 
-/** The bucket closest to exhausted. Ties break toward the active one, then input order. */
+/**
+ * The bucket closest to exhausted. Ties break toward the active one, then input order.
+ *
+ * Scope-blind by design — it picks over whatever list it's handed and has no notion of
+ * "the current model" at all. `switchingHelps` is the only place that reasons about
+ * applicability; it uses this purely as a deterministic tie-break once it has already
+ * narrowed the list down to the buckets worth comparing. Nothing outside this module
+ * calls it anymore (see `renderBuckets`, which used to call it independently and marked
+ * a bucket `switchingHelps` itself considered irrelevant) — kept exported because it's
+ * still a reasonable, independently-testable primitive and removing it would gain
+ * nothing.
+ */
 export function binding(buckets) {
   if (!Array.isArray(buckets) || buckets.length === 0) return null
   let best = null
@@ -30,49 +41,109 @@ export function binding(buckets) {
   return best
 }
 
+/** True for a bucket with no model scope at all — applies to every model, including one we can't name. */
+function isShared(bucket) {
+  const noModel = typeof bucket?.model !== 'string' || bucket.model === ''
+  const noModelId = typeof bucket?.modelId !== 'string' || bucket.modelId === ''
+  return noModel && noModelId
+}
+
 /**
- * Switching models helps ONLY when the binding bucket is scoped to the model in use.
+ * A bucket is applicable to `currentModel` when it can actually constrain the session
+ * that's running right now: a shared bucket applies to everyone, unconditionally. A
+ * scoped bucket applies only when `sameModel` confirms the scope matches — which also
+ * covers the "could not confirm" case (see `sameModel`'s own doc): an unconfirmed match
+ * is treated as inapplicable, the same false-negative bias every guess-avoidance rule in
+ * this module leans on. A bucket scoped to some other, confirmed-different model is
+ * exactly as inapplicable as one whose scope simply couldn't be verified — either way it
+ * must never be shown as binding this session or drive the advice sentence.
+ */
+function isApplicable(bucket, currentModel) {
+  if (isShared(bucket)) return true
+  return sameModel(bucket, currentModel)
+}
+
+/**
+ * Switching models helps ONLY when the bucket actually binding THIS session — the
+ * highest-percentage bucket that applies to `currentModel` — is scoped to that model.
  * Anything else — a shared bucket, an unknown model, a bucket scoped to another model —
  * is false. This function never speculates about relative model cost; the API does not
  * support that and inventing it is the confusion this plugin exists to remove.
+ *
+ * Returns `{ helps, bucket, reason }`. `bucket` is the single bucket this function
+ * actually reasoned about — the one a renderer should mark as binding, if any — so a
+ * caller (see `renderBuckets`) never has to (and never should) re-derive "which bucket
+ * binds" on its own via a second, scope-blind pass; two independent answers to the same
+ * question is exactly how this function and its renderer used to disagree.
  */
 export function switchingHelps(buckets, currentModel) {
   const list = Array.isArray(buckets) ? buckets : []
-  if (list.length === 0) return { helps: false, reason: 'No rate-limit buckets were reported.' }
+  if (list.length === 0) return { helps: false, bucket: null, reason: 'No rate-limit buckets were reported.' }
 
-  // Decide from the SET of buckets at the maximum, not from a single `binding()` pick.
-  // With two model-scoped buckets tied at the same percentage, an order-dependent pick
-  // flipped this function between true and false for identical inputs.
-  const max = Math.max(...list.map((b) => b.percent))
-  const atMax = list.filter((b) => b.percent === max)
-  const shown = binding(list)
+  const modelKnown = typeof currentModel === 'string' && currentModel !== ''
 
-  if (!currentModel || typeof currentModel !== 'string') {
-    return { helps: false,
-      reason: `The binding limit is ${shown.kind} at ${Math.round(max)}%. The current model could not be determined, so no advice is offered.` }
+  // When the current model is unknown, no bucket can be shown to be inapplicable to it —
+  // "inapplicable" is a claim about a specific model, and we have none to compare
+  // against — so every bucket counts as applicable and the sentence says plainly that no
+  // advice is being offered, rather than picking a model to compare against by guessing.
+  const applicable = modelKnown ? list.filter((b) => isApplicable(b, currentModel)) : list
+
+  if (applicable.length === 0) {
+    // Only reachable when the model IS known and every reported bucket is scoped away
+    // from it (confirmed-different or unconfirmed) — nothing here constrains the session
+    // actually running, so nothing is marked binding, but the reason still names the
+    // highest bucket reported so the exclusion is visible rather than silent.
+    const max = Math.max(...list.map((b) => b.percent))
+    const atMax = list.filter((b) => b.percent === max)
+    const excluded = binding(atMax)
+    return { helps: false, bucket: null, reason: inapplicabilityReason(excluded, max) }
+  }
+
+  const max = Math.max(...applicable.map((b) => b.percent))
+  const atMax = applicable.filter((b) => b.percent === max)
+  // Decide from the SET of buckets at the maximum, not a single blind pick, then use
+  // `binding()` only as a deterministic tie-break within that set. With two buckets tied
+  // at the same percentage, an order-dependent pick flipped this function between true
+  // and false for identical inputs.
+  const winner = binding(atMax)
+
+  if (!modelKnown) {
+    return { helps: false, bucket: winner,
+      reason: `The binding limit is ${winner.kind} at ${Math.round(max)}%. The current model could not be determined, so no advice is offered.` }
   }
 
   // Switching helps only if EVERY bucket at the maximum is scoped to the model in use.
-  // If any shared bucket, or one scoped to another model, is equally exhausted, then
-  // switching moves you off one ceiling straight onto another.
-  //
-  // No `b.model &&` / `!b.model ||` guard here: sameModel() already decides correctly on
-  // its own, including when `model` (display_name) is null but `modelId` is present. Gating
-  // on `b.model` first made a bucket identifiable only by id unreachable — it always looked
-  // shared, which is not just a wrong answer but a false user-facing claim.
+  // If any shared bucket is equally exhausted, switching moves you off one ceiling
+  // straight onto another. Note a bucket scoped to a DIFFERENT model can never reach
+  // `atMax` here — it was already excluded from `applicable` above — so the only way
+  // `allOurs` can be false is a shared bucket tying with a scoped one.
   const allOurs = atMax.every((b) => sameModel(b, currentModel))
   if (!allOurs) {
-    const blocker = atMax.find((b) => !sameModel(b, currentModel))
-    // A bucket is model-scoped if EITHER identifying field is present; prefer the
-    // human-readable display_name for the message, falling back to the id.
-    const label = blocker.model ?? blocker.modelId
-    return { helps: false,
-      reason: label
-        ? `The binding limit is scoped to ${label}, not the model in use. Switching would not change it.`
-        : `The binding limit is ${blocker.kind} at ${Math.round(max)}%, which every model draws on. Switching models would not change it.` }
+    const blockers = atMax.filter((b) => !sameModel(b, currentModel))
+    const blocker = binding(blockers) // same deterministic tie-break, applied to the actual blocker(s)
+    return { helps: false, bucket: blocker,
+      reason: `The binding limit is ${blocker.kind} at ${Math.round(max)}%, which every model draws on. Switching models would not change it.` }
   }
-  return { helps: true,
-    reason: `The binding limit is ${atMax[0].model ?? atMax[0].modelId}'s own weekly allowance at ${Math.round(max)}%. Another model draws on a different allowance, so switching would help right now.` }
+  return { helps: true, bucket: winner,
+    reason: `The binding limit is ${winner.model ?? winner.modelId}'s own weekly allowance at ${Math.round(max)}%. Another model draws on a different allowance, so switching would help right now.` }
+}
+
+/**
+ * Explains why a bucket was excluded from consideration entirely (see the
+ * `applicable.length === 0` branch above) — the one place `switchingHelps` still needs
+ * to name a bucket that never got to be a candidate for binding this session. Distinct
+ * from the `!allOurs` reason above, which explains why an applicable bucket lost: a
+ * bucket reaching this function was inapplicable outright.
+ */
+function inapplicabilityReason(bucket, max) {
+  const label = bucket?.model ?? bucket?.modelId
+  if (!label) {
+    // Defensive: unreachable in practice (a bucket with neither field is shared, and a
+    // shared bucket is always applicable — see isShared/isApplicable), but never assert
+    // a claim this function cannot back up.
+    return `The binding limit is ${bucket.kind} at ${Math.round(max)}%. Its scope could not be determined.`
+  }
+  return `The binding limit is scoped to ${label} at ${Math.round(max)}%, which does not apply to the model in use. Switching would not change it.`
 }
 
 /**

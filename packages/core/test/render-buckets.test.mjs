@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderBuckets } from '../render-buckets.mjs'
-import { normaliseLimits } from '../buckets.mjs'
+import { normaliseLimits, switchingHelps } from '../buckets.mjs'
 import { writeCache } from '../cache.mjs'
 import { rawCachePath } from '../usage.mjs'
 
@@ -20,60 +20,109 @@ const buckets = normaliseLimits({ limits: [
 ] })
 
 test('lists every bucket with its percent and scope', () => {
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max',
-    helps: false, reason: 'nope' })
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', helps: false, reason: 'nope' })
   assert.match(out, /session/)
   assert.match(out, /weekly_all/)
   assert.match(out, /Fable/)
   assert.match(out, /40/)
 })
 
-test('names the current model and effort', () => {
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max',
-    helps: false, reason: 'nope' })
+test('names the current model', () => {
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', helps: false, reason: 'nope' })
   assert.match(out, /claude-opus-5/)
-  assert.match(out, /max/)
 })
 
 test('says plainly when the model is unknown', () => {
-  const out = renderBuckets({ buckets, model: null, effort: null, helps: false, reason: 'nope' })
+  const out = renderBuckets({ buckets, model: null, helps: false, reason: 'nope' })
   assert.match(out, /could not be determined/i)
 })
 
-test('omits the effort line entirely when effort is unknown, rather than a permanent placeholder', () => {
-  // Unlike the model, a caller that has no source for effort at all (the /limits CLI)
-  // would print a "could not be determined" placeholder on every single invocation —
-  // that reads as a defect in the tool, not a real limitation being disclosed. So this
-  // is a real behavioral difference from the model line above, not an oversight.
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: null, helps: false, reason: 'nope' })
+// `effort` was removed from this function's signature entirely (not just omitted when
+// null): bin/limits.mjs hard-codes it to null and the hook never calls renderBuckets at
+// all, so there was no reachable production caller that could ever supply a real value —
+// a parameter with no possible non-null input is dead weight, not a real behavior to
+// keep testing. See the doc comment above renderBuckets for the removal note.
+test('never prints an effort line — there is no caller left that could supply one', () => {
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', helps: false, reason: 'nope' })
   assert.doesNotMatch(out, /effort/i)
 })
 
-test('prints the effort line when effort is known', () => {
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max', helps: false, reason: 'nope' })
-  assert.match(out, /effort:\s*max/i)
-})
-
 test('renders nothing misleading with no buckets', () => {
-  const out = renderBuckets({ buckets: [], model: 'x', effort: null, helps: false,
+  const out = renderBuckets({ buckets: [], model: 'x', helps: false,
     reason: 'No rate-limit buckets were reported.' })
   assert.match(out, /no rate-limit buckets/i)
   assert.doesNotMatch(out, /\d+%/)
 })
 
-test('marks the binding bucket', () => {
-  // weekly_all is the highest percentage (40) among the fixture buckets, so binding()
-  // picks it — its line, and only its line, must carry the marker.
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max',
-    helps: false, reason: 'nope' })
+test('marks exactly the bucket object it is handed, nothing else', () => {
+  // renderBuckets has no binding()/scope logic of its own any more — it marks whichever
+  // bucket object `switchingHelps` returned, by reference, and nothing else. Passing
+  // weekly_all explicitly here (rather than relying on renderBuckets to compute "the
+  // highest one" itself) is the whole point of the fix: a caller that reasoned about a
+  // DIFFERENT bucket than the naive maximum must see that bucket marked instead.
+  const out = renderBuckets({ buckets, model: 'claude-opus-5',
+    helps: false, reason: 'nope', bucket: buckets[1] })
   const bindingLine = out.split('\n').find((l) => l.includes('weekly_all'))
   assert.match(bindingLine, /binding/i)
   const sessionLine = out.split('\n').find((l) => l.includes('session') && !l.includes('scoped'))
   assert.doesNotMatch(sessionLine, /binding/i)
+  const fableLine = out.split('\n').find((l) => l.includes('weekly_scoped'))
+  assert.doesNotMatch(fableLine, /binding/i)
+})
+
+test('with no bucket passed through, nothing is marked binding', () => {
+  const out = renderBuckets({ buckets, model: 'claude-opus-5', helps: false, reason: 'nope' })
+  assert.doesNotMatch(out, /binding/i)
+})
+
+test('integration: an other-model-scoped bucket is listed but never marked, and the sentence names the real constraint', () => {
+  // Findings 1 & 2, end to end: switchingHelps and renderBuckets fed from the SAME call,
+  // exactly as bin/limits.mjs wires them, reproducing the repo owner's own account shape
+  // (Opus session; a Fable-scoped bucket sits at the highest percentage but cannot bind
+  // an Opus session).
+  const shaped = normaliseLimits({ limits: [
+    { kind: 'session', group: 'session', percent: 13, is_active: false, scope: null },
+    { kind: 'weekly_all', group: 'weekly', percent: 40, is_active: true, scope: null },
+    { kind: 'weekly_scoped', group: 'weekly', percent: 90, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  const { helps, reason, bucket } = switchingHelps(shaped, 'claude-opus-5')
+  const out = renderBuckets({ buckets: shaped, model: 'claude-opus-5', helps, reason, bucket })
+
+  const fableLine = out.split('\n').find((l) => l.includes('weekly_scoped'))
+  assert.match(fableLine, /Fable/)
+  assert.doesNotMatch(fableLine, /binding/i, 'a bucket scoped to another model must never be marked binding')
+
+  const weeklyAllLine = out.split('\n').find((l) => l.includes('weekly_all'))
+  assert.match(weeklyAllLine, /binding/i)
+  assert.match(out, /weekly_all/)
+  assert.doesNotMatch(out.split('\n').pop(), /90/, 'the sentence must name the real constraint, not the irrelevant 90%')
+})
+
+test('integration: a scoped/shared 61% tie marks and names the SAME bucket, reproducing finding 1b exactly', () => {
+  // Finding 1b, verbatim: is_active is flipped so a scope-blind binding() (which
+  // tie-breaks toward the active bucket) would pick weekly_scoped, while switchingHelps
+  // reasons that weekly_all — the shared one — is the real blocker. Under the bug, the
+  // marker landed on weekly_scoped while the sentence two lines below named weekly_all:
+  // a self-contradiction inside one block. Feeding renderBuckets the SAME `bucket`
+  // switchingHelps returned must make the marker and the sentence agree, always.
+  const tied = normaliseLimits({ limits: [
+    { kind: 'weekly_all', group: 'weekly', percent: 61, is_active: false, scope: null },
+    { kind: 'weekly_scoped', group: 'weekly', percent: 61, is_active: true,
+      scope: { model: { display_name: 'Fable' } } },
+  ] })
+  const { helps, reason, bucket } = switchingHelps(tied, 'claude-fable-5-1')
+  const out = renderBuckets({ buckets: tied, model: 'claude-fable-5-1', helps, reason, bucket })
+
+  const markedLine = out.split('\n').find((l) => l.includes('<- binding'))
+  const sentence = out.split('\n').pop()
+  assert.match(sentence, /weekly_all/)
+  assert.ok(markedLine.includes('weekly_all'),
+    `the marked line and the sentence must name the same bucket — marked: "${markedLine}", sentence: "${sentence}"`)
 })
 
 test('prints the reason sentence verbatim', () => {
-  const out = renderBuckets({ buckets, model: 'claude-opus-5', effort: 'max',
+  const out = renderBuckets({ buckets, model: 'claude-opus-5',
     helps: true, reason: 'This exact sentence must appear untouched.' })
   assert.match(out, /This exact sentence must appear untouched\./)
 })

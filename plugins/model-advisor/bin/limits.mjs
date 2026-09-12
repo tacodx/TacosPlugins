@@ -19,12 +19,11 @@ try {
 
   // `/limits` (commands/limits.md) runs as a plain shell command substitution, not a
   // hook — Claude Code passes it only $CLAUDE_SESSION_ID, never the hook payload that
-  // advisor.mjs receives on stdin. `effort` lives exclusively in that payload (see
-  // docs/superpowers/specs/2026-09-12-model-advisor-design.md §5) and is not persisted
-  // anywhere this CLI can read, so it is unconditionally unknown here — renderBuckets
-  // omits the line entirely rather than this file guessing or printing a placeholder
-  // that would be permanently wrong on every single invocation.
-  const effort = null
+  // advisor.mjs receives on stdin. `effort` lives exclusively in that payload and is not
+  // persisted anywhere this CLI can read, so renderBuckets no longer has a parameter for
+  // it at all — there is no reachable caller (this one, or the hook, which never calls
+  // renderBuckets) that could ever supply a real value. (The design doc's §5/§7 still
+  // describe an effort line; that text is now stale and needs reconciling separately.)
 
   const { raw } = await getGauges({ dir, now: Date.now(), wantRaw: true })
   const buckets = normaliseLimits(raw)
@@ -38,9 +37,9 @@ try {
   const transcriptPath = sessionId ? findSessionTranscript(dir, sessionId) : null
   const model = currentModel({ transcriptPath, settingsPath: join(dir, 'settings.json') })
 
-  const { helps, reason } = switchingHelps(buckets, model)
+  const { helps, reason, bucket } = switchingHelps(buckets, model)
 
-  console.log(renderBuckets({ buckets, model, effort, helps, reason }))
+  console.log(renderBuckets({ buckets, model, helps, reason, bucket }))
 } catch (err) {
   console.log(`model-advisor: /limits could not run — ${err?.message ?? 'unknown error'}`)
 }
