@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
-import { normalise, fetchUsage, getGauges, USAGE_URL } from '../usage.mjs'
+import { normalise, fetchUsage, getGauges, USAGE_URL, rawCachePath } from '../usage.mjs'
+import { writeCache } from '../cache.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const fixture = (n) => JSON.parse(readFileSync(join(HERE, 'fixtures', `${n}.json`), 'utf8'))
@@ -162,6 +163,138 @@ test('a 429 backs off longer than a generic error', async () => {
   } finally {
     rmSync(dir429, { recursive: true, force: true })
     rmSync(dirGeneric, { recursive: true, force: true })
+  }
+})
+
+// model-advisor's whole safety story rests on getGauges NEVER leaking limits[] into
+// usage-guard's path just because model-advisor asked for it moments earlier. Both plugins
+// share the same on-disk cache directory, so this has to be proven from a live network
+// fetch (the shape a real success return takes), not merely from an empty-dir blind path.
+test('getGauges without wantRaw has no raw key, even after a live fetch populates the raw cache', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    const result = await getGauges({ dir, now, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+    assert.equal(Object.hasOwn(result, 'raw'), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// getGauges used to call readRaw() eagerly as an argument at every call site, so the
+// raw-cache file was opened and read even when wantRaw was false — attach() discarded
+// the value, but the read itself had already happened. Confirmed by strace against the
+// real process: usage-guard's PreToolUse (which never passes wantRaw) was opening and
+// discarding usage-raw.json on every single tool call.
+test('a plain (non-wantRaw) call never reads the raw-cache file at all — readRaw is lazy', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  try {
+    // A fresh gauge-cache hit is exactly the branch that used to call readRaw()
+    // unconditionally, so seed both caches fresh and take that path.
+    writeCache(join(dir, 'tacos', 'usage-cache.json'),
+      { five_hour: null, seven_day: null, extra_usage: null, scoped: [] }, { now })
+    writeCache(rawCachePath(dir), { limits: [] }, { now })
+
+    let rawFileRead = false
+    const spyReadFile = (path, ...rest) => {
+      if (path === rawCachePath(dir)) rawFileRead = true
+      return readFileSync(path, ...rest)
+    }
+
+    const result = await getGauges({ dir, now, readFile: spyReadFile })
+
+    // Assert AFTER the call returns, not inside the injected spy — mirrors the
+    // convention throughout this codebase (see cache.test.mjs) even though nothing
+    // here would swallow it; consistency is the point.
+    assert.equal(Object.hasOwn(result, 'raw'), false)
+    assert.equal(rawFileRead, false, 'the raw cache file must never be opened when wantRaw is false')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('wantRaw on a live fetch returns the raw limits[] payload and persists it to its own cache file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    const result = await getGauges({
+      dir, now, wantRaw: true,
+      fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }),
+    })
+    assert.ok(Array.isArray(result.raw?.limits))
+    assert.equal(result.raw.limits[1].kind, 'weekly_scoped')
+    const onDisk = JSON.parse(readFileSync(rawCachePath(dir), 'utf8'))
+    assert.deepEqual(onDisk.data, fixture('usage-max'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// The raw-cache write on a successful fetch is deliberately unconditional (not gated on
+// wantRaw) precisely so this scenario works: usage-guard and model-advisor both hook
+// UserPromptSubmit and share this same cache directory, and whichever one's hook fires
+// first — here, usage-guard's plain call, which never asks for raw — still leaves a raw
+// cache the other can read. Without the unconditional write, model-advisor would see
+// raw: null for a full TTL window every time usage-guard's hook wins the race, which is
+// the common case whenever both plugins are installed.
+test('a plain getGauges() fetch feeds a later wantRaw:true call within the same TTL, without fetching twice', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  let fetchCount = 0
+  const fetchImpl = async () => { fetchCount++; return { ok: true, json: async () => fixture('usage-max') } }
+  try {
+    const first = await getGauges({ dir, now, fetchImpl }) // usage-guard's own call: no wantRaw
+    assert.equal(Object.hasOwn(first, 'raw'), false, 'sanity check: this call never asked for raw')
+
+    const second = await getGauges({ dir, now: now + 1, wantRaw: true, fetchImpl }) // model-advisor's call, moments later
+
+    assert.equal(fetchCount, 1, 'the second call must reuse the raw cache the first call left, not fetch again')
+    assert.ok(Array.isArray(second.raw?.limits))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('wantRaw on a fresh gauge-cache hit reads raw back from its own cache file, without touching the network', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    await getGauges({ dir, now, wantRaw: true, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+
+    let fetchCalled = false
+    const result = await getGauges({
+      dir, now: now + 1, wantRaw: true,
+      fetchImpl: async () => { fetchCalled = true; return { ok: true, json: async () => ({}) } },
+    })
+    assert.equal(result.fresh, true, 'sanity check: the gauge cache must be a fresh hit for this test to mean anything')
+    assert.equal(fetchCalled, false)
+    assert.ok(Array.isArray(result.raw?.limits))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Brief: "If the raw cache is missing or stale while the gauge cache is fresh, return
+// raw: null — the advisor treats that as no buckets and stays silent." Simulated here by
+// deleting the raw cache file after it was written, while the gauge cache is still fresh.
+test('wantRaw returns null when the raw cache is missing but the gauge cache is still fresh', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-guard-test-'))
+  const now = Date.now()
+  withCreds(dir, now)
+  try {
+    await getGauges({ dir, now, wantRaw: true, fetchImpl: async () => ({ ok: true, json: async () => fixture('usage-max') }) })
+    rmSync(rawCachePath(dir), { force: true })
+
+    const result = await getGauges({ dir, now: now + 1, wantRaw: true, fetchImpl: async () => { throw new Error('must not be called') } })
+    assert.equal(result.fresh, true)
+    assert.equal(result.raw, null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

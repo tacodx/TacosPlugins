@@ -186,6 +186,14 @@ block your own tool calls.
   published, stable API. Anthropic can change or remove it at any time, and
   this plugin would have no advance warning.
 
+- **The full API response is written to disk, mode 0600.** Alongside the
+  normalised gauges this plugin actually reads, every successful fetch also
+  writes the complete, unmodified response to
+  `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/usage-raw.json` — this happens
+  regardless of whether this plugin or `model-advisor` triggered the fetch,
+  since both share the same cache directory. Neither plugin reads anything
+  from it beyond the per-model `limits[]` `model-advisor` uses for `/limits`.
+
 - **The guard always fails open.** Missing credentials, an API error, a
   failed token refresh, a stale cache past its maximum age, an unreadable
   config, a hook timeout — every one of these allows the call. It will never
