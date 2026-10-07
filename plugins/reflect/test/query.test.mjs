@@ -237,6 +237,10 @@ test("all time starts at the earliest day any source has, and coverage names eac
 
   const empty = view({ rangeId: 'all' })
   assert.deepEqual(empty.range, { id: 'all', from: TODAY, to: TODAY, days: 1 })
+
+  // A clock that ran ahead: the only known day is after today.
+  const ahead = view({ rangeId: 'all', days: { '2026-03-12': day({ out: 1 }) } })
+  assert.deepEqual(ahead.range, { id: 'all', from: TODAY, to: TODAY, days: 1 })
   assert.deepEqual(empty.coverage, { transcriptsFrom: null, historyFrom: null, workFrom: null })
 })
 

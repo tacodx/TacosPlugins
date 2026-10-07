@@ -2,9 +2,24 @@
 // The record shapes this relies on are the measured ones in section 4.2 of
 // docs/superpowers/specs/2026-10-07-reflect-design.md.
 import { bump, emptyDay, emptyModel, own } from './agg.mjs'
+import { isPlausible } from './clock.mjs'
+
+/**
+ * Raise this whenever a change here would give a different summary for the same
+ * file. The store remembers which version made its summaries and rescans every
+ * transcript still on disk when it differs.
+ */
+export const SCAN_VERSION = 1
 
 const ACTIVE_GAP_MS = 5 * 60 * 1000
 const NESTED_MARKERS = ['/.claude/worktrees/', '/.superpowers/']
+// The usage fields of a reply, and the aggregate field each one adds to.
+const USAGE = [
+  ['output_tokens', 'out'],
+  ['input_tokens', 'inp'],
+  ['cache_read_input_tokens', 'cacheR'],
+  ['cache_creation_input_tokens', 'cacheW'],
+]
 
 const count = (value) => (Number.isFinite(value) ? value : 0)
 
@@ -22,14 +37,15 @@ export function projectOf(cwd, home) {
   return path
 }
 
-// Most lines are tool results, some of them megabytes long. Only three kinds of
+// Most lines are tool results, some of them megabytes long. Only a few kinds of
 // line matter, and each can be recognised without parsing. This is a pre-filter
 // only: what a line is gets decided from the parsed record.
 function mayMatter(line) {
   return (
     line.includes('"type":"assistant"') ||
     (line.includes('"type":"user"') && line.includes('"kind":"human"')) ||
-    line.includes('"type":"custom-title"')
+    line.includes('"type":"custom-title"') ||
+    line.includes('"type":"ai-title"')
   )
 }
 
@@ -37,9 +53,11 @@ export function createScanner({ kind, fileId, home, clock }) {
   const isMain = kind === 'main'
   const summary = { kind, sessionId: fileId, project: null, days: {}, bad: 0 }
   const session = { start: null, end: null, activeMs: 0, prompts: 0, out: 0 }
-  const seenMessages = new Set()
+  const replies = new Map() // message.id -> where the reply was counted, and how much of it so far
   const seenTools = new Set()
   let lastAt = null
+  let ownTitle = null // the title the person gave
+  let autoTitle = null // the one Claude Code made up
 
   // Main files only: the session's span, and time counted as active.
   function touch(ms, agg) {
@@ -80,35 +98,31 @@ export function createScanner({ kind, fileId, home, clock }) {
       if (name.startsWith('mcp__')) bump(agg.mcp, name.split('__')[1] ?? '')
     }
 
-    // Every line of one reply repeats the same usage: count it on the first only.
-    if (typeof message.id !== 'string' || seenMessages.has(message.id)) return
-    seenMessages.add(message.id)
-
-    const usage = message.usage ?? {}
-    const out = count(usage.output_tokens)
-    const inp = count(usage.input_tokens)
-    const cacheR = count(usage.cache_read_input_tokens)
-    const cacheW = count(usage.cache_creation_input_tokens)
-
-    if (isMain) {
-      agg.msgs += 1
-      session.out += out
-    } else {
-      agg.subMsgs += 1
+    if (typeof message.id !== 'string') return
+    let counted = replies.get(message.id)
+    if (counted === undefined) {
+      // The first line of a reply: this is where, and on which day, it counts.
+      const model = own(agg.models, typeof message.model === 'string' ? message.model : '(unknown)', emptyModel)
+      counted = { agg, model, seen: USAGE.map(() => 0) }
+      replies.set(message.id, counted)
+      if (isMain) agg.msgs += 1
+      else agg.subMsgs += 1
+      model.msgs += 1
+      if (typeof record.effort === 'string') bump(agg.efforts, record.effort)
     }
-    agg.out += out
-    agg.inp += inp
-    agg.cacheR += cacheR
-    agg.cacheW += cacheW
 
-    const model = own(agg.models, typeof message.model === 'string' ? message.model : '(unknown)', emptyModel)
-    model.msgs += 1
-    model.out += out
-    model.inp += inp
-    model.cacheR += cacheR
-    model.cacheW += cacheW
-
-    if (typeof record.effort === 'string') bump(agg.efforts, record.effort)
+    // A reply is written once per content block. In a subagent file the early
+    // lines carry the usage as it stood mid-stream, and only the last has the
+    // final figures, so each field counts as the largest value any line shows.
+    const usage = message.usage ?? {}
+    USAGE.forEach(([field, total], i) => {
+      const more = count(usage[field]) - counted.seen[i]
+      if (more <= 0) return
+      counted.seen[i] += more
+      counted.agg[total] += more
+      counted.model[total] += more
+      if (isMain && total === 'out') session.out += more
+    })
   }
 
   return {
@@ -121,29 +135,40 @@ export function createScanner({ kind, fileId, home, clock }) {
         summary.bad += 1
         return
       }
-      if (record === null || typeof record !== 'object') return
+      if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+        summary.bad += 1
+        return
+      }
       // A resumed session copies earlier records in under their old session id.
       if (isMain && record.sessionId !== fileId) return
 
-      if (record.type === 'custom-title') {
-        if (isMain && typeof record.customTitle === 'string') summary.title = record.customTitle
+      if (record.type === 'custom-title' || record.type === 'ai-title') {
+        if (!isMain) return
+        if (typeof record.customTitle === 'string') ownTitle = record.customTitle
+        if (typeof record.aiTitle === 'string') autoTitle = record.aiTitle
         return
       }
+      if (record.type !== 'user' && record.type !== 'assistant') return
 
       const ms = Date.parse(record.timestamp)
-      if (Number.isNaN(ms)) return
+      if (!isPlausible(ms)) {
+        summary.bad += 1
+        return
+      }
       if (summary.project === null && typeof record.cwd === 'string') summary.project = projectOf(record.cwd, home)
       if (isMain && summary.entrypoint === undefined && typeof record.entrypoint === 'string') {
         summary.entrypoint = record.entrypoint
       }
 
       if (record.type === 'user') prompt(record, ms)
-      else if (record.type === 'assistant') reply(record, ms)
+      else reply(record, ms)
     },
 
     finish() {
       if (summary.project === null) summary.project = '(unknown)'
       if (isMain && session.start !== null) summary.session = session
+      const title = ownTitle ?? autoTitle
+      if (title !== null) summary.title = title
       return summary
     },
   }

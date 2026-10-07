@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { createClock } from '../indexer/clock.mjs'
 import { projectOf, scanLines } from '../indexer/scan.mjs'
-import { HOME, prompt, reply, text, title, toolResult, toolUse, utc } from './helpers.mjs'
+import { aiTitle, HOME, prompt, reply, text, title, toolResult, toolUse, utc } from './helpers.mjs'
 
 const S = 'session-1'
 const main = (fileId = S, clock = utc) => ({ kind: 'main', fileId, home: HOME, clock })
@@ -30,6 +30,37 @@ test('a reply written as three lines counts its usage once', () => {
   assert.equal(day.cacheW, 7)
   assert.deepEqual(day.models, { 'claude-opus-5-5': { msgs: 1, out: 100, inp: 3, cacheR: 50, cacheW: 7 } })
   assert.deepEqual(day.tools, { Bash: 1 })
+})
+
+// Measured on real transcripts: in a subagent file the first line of a reply has
+// the usage as it stood mid-stream (often 1 or 2 output tokens) and only the last
+// line has the final figure. Counting the first line lost 62% of all output tokens.
+test("a reply's usage is the largest any of its lines reports", () => {
+  const line = (out, cacheW) => reply({ id: 'm1', session: 'parent', at: at('10:00:00'), out, inp: 3, cacheR: 50, cacheW })
+  const day = scanLines([line(2, 7), line(2, 7), line(900, 6)], sub()).days[DAY]
+
+  assert.equal(day.out, 900)
+  assert.equal(day.cacheW, 7) // a field that shrinks keeps the larger value
+  assert.equal(day.inp, 3)
+  assert.equal(day.cacheR, 50)
+  assert.equal(day.subMsgs, 1)
+  assert.deepEqual(day.models, { 'claude-opus-5-5': { msgs: 1, out: 900, inp: 3, cacheR: 50, cacheW: 7 } })
+})
+
+test('a reply that grows is counted on the day of its first line, and in its session', () => {
+  const summary = scanLines(
+    [
+      reply({ id: 'm1', session: S, at: '2026-03-01T23:59:59.000Z', out: 5 }),
+      reply({ id: 'm1', session: S, at: '2026-03-02T00:00:01.000Z', out: 80 }),
+    ],
+    main(),
+  )
+
+  assert.equal(summary.days['2026-03-01'].out, 80)
+  assert.equal(summary.days['2026-03-01'].msgs, 1)
+  assert.equal(summary.days['2026-03-02'].out, 0)
+  assert.equal(summary.days['2026-03-02'].msgs, 0)
+  assert.equal(summary.session.out, 80)
 })
 
 test('a tool call is counted once per tool_use id, even when its line repeats', () => {
@@ -82,16 +113,20 @@ test('a subagent file adds to subMsgs, keeps records of its parent session, and 
     [
       prompt({ session: 'parent', at: at('10:00:00') }),
       reply({ id: 'm1', session: 'parent', at: at('10:00:01'), out: 20 }),
+      reply({ id: 'm2', session: 'parent', at: at('10:01:01'), out: 1 }),
+      aiTitle({ session: 'parent', text: 'Not this file\'s to keep' }),
     ],
     sub(),
   )
   const day = summary.days[DAY]
 
-  assert.equal(day.subMsgs, 1)
+  assert.equal(day.subMsgs, 2)
   assert.equal(day.msgs, 0)
-  assert.equal(day.out, 20)
+  assert.equal(day.out, 21)
   assert.equal(day.prompts, 0)
+  assert.equal(day.activeMs, 0) // busy time is a session's, and the session is the main file
   assert.equal(summary.session, undefined)
+  assert.equal(summary.title, undefined)
 })
 
 test('a synthetic reply is ignored entirely', () => {
@@ -189,6 +224,42 @@ test('the project and the entry point are the first ones seen; the title is the 
   assert.equal(summary.project, 'alpha')
   assert.equal(summary.entrypoint, 'claude-desktop')
   assert.equal(summary.title, 'Second')
+})
+
+test("the person's own title wins over the one Claude Code made up, which is the fallback", () => {
+  const named = scanLines(
+    [
+      aiTitle({ session: S, text: 'Auto' }),
+      title({ session: S, text: 'Mine' }),
+      aiTitle({ session: S, text: 'Auto again' }),
+      prompt({ session: S, at: at('10:00:00') }),
+    ],
+    main(),
+  )
+  assert.equal(named.title, 'Mine')
+
+  const unnamed = scanLines(
+    [aiTitle({ session: S, text: 'Auto' }), aiTitle({ session: S, text: 'Auto again' }), prompt({ session: S, at: at('10:00:00') })],
+    main(),
+  )
+  assert.equal(unnamed.title, 'Auto again')
+})
+
+test('a record with no believable time, or that is not a record at all, is skipped and counted', () => {
+  const summary = scanLines(
+    [
+      reply({ id: 'm1', session: S, at: 'never', out: 100 }),
+      reply({ id: 'm2', session: S, at: '1970-01-01T00:00:00.000Z', out: 100 }),
+      prompt({ session: S, at: '2500-01-01T00:00:00.000Z' }),
+      JSON.stringify([{ type: 'assistant' }]),
+      reply({ id: 'm3', session: S, at: at('10:00:00'), out: 4 }),
+    ],
+    main(),
+  )
+
+  assert.equal(summary.bad, 4)
+  assert.deepEqual(Object.keys(summary.days), [DAY])
+  assert.equal(summary.days[DAY].out, 4)
 })
 
 test('a line that does not parse is counted and the rest still scanned', () => {

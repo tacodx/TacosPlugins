@@ -22,6 +22,8 @@ const USAGE =
 export const NOTE_BUSY = 'Another session is updating the history, so this view may be a moment behind.'
 export const NOTE_LOST =
   'The saved history could not be read and was rebuilt from the transcripts still on disk. Older history is lost.'
+export const NOTE_BUSY_LOST =
+  'The saved history could not be read, and another session is rebuilding it. Try again in a moment.'
 
 class UsageError extends Error {}
 
@@ -47,7 +49,8 @@ async function view(options, env) {
   const home = options.home ?? homedir()
   const now = options.now === undefined ? Date.now() : Date.parse(options.now)
   if (Number.isNaN(now)) throw new Error(`--now is not a time: ${options.now}`)
-  const clock = createClock(options.tz ?? systemTimeZone())
+  const zone = options.tz ?? systemTimeZone()
+  const clock = createClock(zone)
   const notes = []
 
   // Null when another process is indexing: then this one neither indexes nor saves.
@@ -55,15 +58,19 @@ async function view(options, env) {
   let store
   try {
     const read = readStore(data)
+    // Not ours to replace: an older copy of this code must leave a newer store alone.
+    if (read.lost === 'newer') throw new Error('the saved history is from a newer version of reflect; update the plugin')
     store = read.store
-    if (read.lost !== null) {
-      notes.push(NOTE_LOST)
-      if (release !== null) quarantine(data, now)
-    }
     if (release === null) {
-      notes.push(NOTE_BUSY)
+      notes.push(read.lost === null ? NOTE_BUSY : NOTE_BUSY_LOST)
     } else {
-      await updateStore(store, projects, { home, clock })
+      await updateStore(store, projects, { home, clock, zone })
+      // Moved aside only now, with the rebuild in hand: a run that fails before
+      // this leaves the file where it is, and the next run says so again.
+      if (read.lost !== null) {
+        quarantine(data, now)
+        notes.push(NOTE_LOST)
+      }
       saveStore(data, store)
     }
   } finally {

@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -12,6 +13,7 @@ import {
   quarantine,
   readStore,
   saveStore,
+  STORE_VERSION,
   upsertFile,
 } from '../indexer/store.mjs'
 import { tempDir } from './helpers.mjs'
@@ -155,11 +157,22 @@ test('an unusable store is reported and left in place until it is moved aside', 
   assert.deepEqual(readStore(dir), { store: emptyStore(), lost: 'unreadable' })
   assert.equal(readFileSync(path, 'utf8'), 'not json')
 
-  writeFileSync(path, JSON.stringify({ ...emptyStore(), version: 2 }))
+  writeFileSync(path, JSON.stringify({ ...emptyStore(), version: STORE_VERSION - 1 }))
   assert.equal(readStore(dir).lost, 'wrong-version')
 
   quarantine(dir, 1234)
   assert.deepEqual(readdirSync(dir), ['store.corrupt-1234.json'])
+})
+
+// An old copy of this code may still be running in another session after an
+// upgrade. It must not take the newer store for a broken one and replace it.
+test('a store saved by a newer version is reported as such, not as broken', (t) => {
+  const dir = tempDir(t)
+  const newer = JSON.stringify({ ...emptyStore(), version: STORE_VERSION + 1, files: 'a shape this version does not know' })
+  writeFileSync(join(dir, 'store.json'), newer)
+
+  assert.deepEqual(readStore(dir), { store: emptyStore(), lost: 'newer' })
+  assert.equal(readFileSync(join(dir, 'store.json'), 'utf8'), newer)
 })
 
 test('the lock is held by one caller at a time and leaves nothing behind', (t) => {
@@ -176,17 +189,49 @@ test('the lock is held by one caller at a time and leaves nothing behind', (t) =
   assert.deepEqual(readdirSync(dir), [])
 })
 
-test('a lock older than two minutes is abandoned and taken over; a younger one is not', (t) => {
+test('a lock whose owner is gone is taken at once', (t) => {
+  const dir = tempDir(t)
+  const { pid } = spawnSync(process.execPath, ['-e', '']) // a process that has already exited
+  writeFileSync(join(dir, 'store.lock'), `${pid} left-behind`)
+
+  const release = acquireLock(dir)
+
+  assert.equal(typeof release, 'function')
+  release()
+  assert.deepEqual(readdirSync(dir), [])
+})
+
+// The owner here is this test process, which is certainly alive. A run can take
+// minutes on a large history, so only real age gives a live owner's lock away.
+test("a live owner's lock is respected until it is older than any run", (t) => {
   const dir = tempDir(t)
   const path = join(dir, 'store.lock')
   const minutesAgo = (n) => new Date(Date.now() - n * 60_000)
 
-  writeFileSync(path, 'someone else')
-  utimesSync(path, minutesAgo(1), minutesAgo(1))
+  writeFileSync(path, `${process.pid} another-run`)
+  utimesSync(path, minutesAgo(9), minutesAgo(9))
   assert.equal(acquireLock(dir), null)
 
-  utimesSync(path, minutesAgo(3), minutesAgo(3))
+  utimesSync(path, minutesAgo(11), minutesAgo(11))
   const release = acquireLock(dir)
   assert.equal(typeof release, 'function')
   release()
+})
+
+test('a lock file still being written is not mistaken for an abandoned one', (t) => {
+  const dir = tempDir(t)
+  writeFileSync(join(dir, 'store.lock'), '') // created, its owner not yet written into it
+
+  assert.equal(acquireLock(dir), null)
+})
+
+test('releasing a lock that was taken over leaves the new owner\'s lock alone', (t) => {
+  const dir = tempDir(t)
+  const path = join(dir, 'store.lock')
+  const release = acquireLock(dir)
+
+  writeFileSync(path, `${process.pid} the-run-that-took-over`)
+  release()
+
+  assert.equal(readFileSync(path, 'utf8'), `${process.pid} the-run-that-took-over`)
 })

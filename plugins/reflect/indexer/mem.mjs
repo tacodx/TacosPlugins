@@ -2,6 +2,8 @@
 // command line tool. Both are optional: without either there is no work mix.
 import { execFileSync } from 'node:child_process'
 
+import { isPlausible } from './clock.mjs'
+
 const QUARTER_HOUR = 15 * 60 * 1000
 
 // Grouped by quarter hour, not by day: the day depends on the reader's time
@@ -33,8 +35,10 @@ export function readWork(dbPath, clock, run = sqlite) {
 
   const merged = new Map()
   for (const row of rows) {
-    if (row === null || typeof row !== 'object' || !Number.isFinite(row.q) || !Number.isFinite(row.n)) continue
-    const entry = { day: clock(row.q * QUARTER_HOUR).day, project: String(row.project), type: String(row.type), n: row.n }
+    if (row === null || typeof row !== 'object' || !Number.isFinite(row.n)) continue
+    const at = row.q * QUARTER_HOUR
+    if (!isPlausible(at)) continue
+    const entry = { day: clock(at).day, project: String(row.project), type: String(row.type), n: row.n }
     const key = JSON.stringify([entry.day, entry.project, entry.type])
     const seen = merged.get(key)
     if (seen === undefined) merged.set(key, entry)

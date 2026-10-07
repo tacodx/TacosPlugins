@@ -5,7 +5,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSyn
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { NOTE_BUSY, NOTE_LOST, run } from '../indexer/cli.mjs'
+import { NOTE_BUSY, NOTE_BUSY_LOST, NOTE_LOST, run } from '../indexer/cli.mjs'
+import { STORE_VERSION } from '../indexer/store.mjs'
 import { HOME, prompt, reply, tempDir, toolUse } from './helpers.mjs'
 
 const INDEXER = join(dirname(fileURLToPath(import.meta.url)), '..', 'indexer')
@@ -84,6 +85,69 @@ test('while another process holds the lock, view answers from the store as it st
   assert.equal(view.totals.out, 0) // nothing was indexed
   assert.equal(view.totals.prompts, 1) // the prompt history needs no lock
   assert.deepEqual(readdirSync(dataDir(config)), ['store.lock']) // nothing saved, the other lock left alone
+})
+
+test('with no --range, the view covers thirty days', async (t) => {
+  const config = configDir(t)
+
+  const result = await run(['view', '--now', NOW, '--tz', 'UTC', '--home', HOME], env(config))
+
+  assert.equal(result.code, 0)
+  assert.equal(JSON.parse(result.stdout).range.id, '30d')
+})
+
+test('an unreadable store while another process holds the lock is left alone, and nothing is called rebuilt', async (t) => {
+  const config = configDir(t)
+  mkdirSync(dataDir(config), { recursive: true })
+  writeFileSync(join(dataDir(config), 'store.json'), 'not json')
+  writeFileSync(join(dataDir(config), 'store.lock'), 'someone else')
+
+  const view = await viewOf(config)
+
+  assert.deepEqual(view.notes, [NOTE_BUSY_LOST])
+  assert.deepEqual(readdirSync(dataDir(config)).sort(), ['store.json', 'store.lock'])
+  assert.equal(readFileSync(join(dataDir(config), 'store.json'), 'utf8'), 'not json')
+})
+
+// The rebuild is the slow path, the one most likely to be cut short. If it is,
+// the unreadable file must still be there, so the next run reports the loss.
+test('a rebuild that fails leaves the unreadable store in place, and the next run still reports the loss', async (t) => {
+  const config = configDir(t)
+  mkdirSync(dataDir(config), { recursive: true })
+  writeFileSync(join(dataDir(config), 'store.json'), 'not json')
+
+  const failed = await run(args('--projects', join(config, 'history.jsonl')), env(config)) // a file where a folder belongs
+  assert.equal(failed.code, 1)
+  assert.deepEqual(readdirSync(dataDir(config)), ['store.json'])
+
+  assert.deepEqual((await viewOf(config)).notes, [NOTE_LOST])
+})
+
+test('a store from a newer version stops the command and is not touched', async (t) => {
+  const config = configDir(t)
+  mkdirSync(dataDir(config), { recursive: true })
+  const newer = JSON.stringify({ version: STORE_VERSION + 1, shape: 'unknown here' })
+  writeFileSync(join(dataDir(config), 'store.json'), newer)
+
+  const result = await run(args(), env(config))
+
+  assert.equal(result.code, 1)
+  assert.equal(result.stdout, '')
+  assert.match(result.stderr, /^reflect: the saved history is from a newer version of reflect/)
+  assert.deepEqual(readdirSync(dataDir(config)), ['store.json'])
+  assert.equal(readFileSync(join(dataDir(config), 'store.json'), 'utf8'), newer)
+})
+
+test('a change of time zone is picked up on the next run', async (t) => {
+  const config = configDir(t)
+  appendFileSync(join(config, TRANSCRIPT), `${prompt({ session: 's1', at: '2026-03-09T23:30:00.000Z' })}\n`)
+
+  const inUtc = await viewOf(config)
+  assert.equal(inUtc.days.find((each) => each.day === '2026-03-09').prompts, 2)
+
+  const inBerlin = await viewOf(config, '--tz', 'Europe/Berlin')
+  assert.equal(inBerlin.days.find((each) => each.day === '2026-03-09').prompts, 1)
+  assert.equal(inBerlin.days.find((each) => each.day === '2026-03-10').prompts, 1)
 })
 
 test('an unreadable store is moved aside and rebuilt, and the loss is said', async (t) => {

@@ -22,6 +22,9 @@ test('history counts prompts per local day and hour and skips what it cannot rea
     JSON.stringify({ timestamp: ms('2026-03-02T23:10:00Z'), project: '/x', sessionId: 'b', display: 'three' }),
     'not json',
     JSON.stringify({ timestamp: 'soon' }),
+    JSON.stringify({ timestamp: 1e20 }), // cannot be formatted as a date at all
+    JSON.stringify({ timestamp: 0 }), // would stretch "all time" back to 1970
+    JSON.stringify({ timestamp: Math.floor(ms('2026-03-01T09:15:00Z') / 1000) }), // seconds, not milliseconds
     'null',
     '',
   ].join('\n')
@@ -45,6 +48,8 @@ test('work rows are bucketed by local day and merged across the quarter hours of
       { q: quarter('2026-03-01T09:15:00Z'), project: 'demo', type: 'feature', n: 3 },
       { q: quarter('2026-03-02T00:00:00Z'), project: 'demo', type: 'bugfix', n: 1 },
       { q: 'not a number', project: 'demo', type: 'bugfix', n: 1 },
+      { q: 0, project: 'demo', type: 'bugfix', n: 1 },
+      { q: 1e18, project: 'demo', type: 'bugfix', n: 1 },
     ])
   }
 

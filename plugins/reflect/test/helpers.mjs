@@ -84,3 +84,7 @@ export function toolResult({ session, at, result = { stdout: 'done' }, cwd = `${
 
 export const title = ({ session, text: value }) =>
   JSON.stringify({ type: 'custom-title', customTitle: value, sessionId: session })
+
+/** The title Claude Code makes up for a session nobody named. */
+export const aiTitle = ({ session, text: value }) =>
+  JSON.stringify({ type: 'ai-title', aiTitle: value, sessionId: session })

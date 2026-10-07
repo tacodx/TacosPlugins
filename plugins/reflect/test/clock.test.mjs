@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { addDays, createClock, weekdayOf } from '../indexer/clock.mjs'
+import { addDays, createClock, isPlausible, weekdayOf } from '../indexer/clock.mjs'
 
 const ms = (iso) => Date.parse(iso)
 
@@ -28,6 +28,26 @@ test('the cache does not blur a zone whose offset is not a whole hour', () => {
 
   assert.deepEqual(kolkata(ms('2026-01-01T18:29:00Z')), { day: '2026-01-01', hour: 23 })
   assert.deepEqual(kolkata(ms('2026-01-01T18:31:00Z')), { day: '2026-01-02', hour: 0 })
+})
+
+// Nepal is UTC+5:45, so its midnight falls at a quarter past: a cache keyed by
+// the half hour would get this wrong where the Kolkata case cannot tell.
+test('the cache does not blur a zone whose offset ends on a quarter hour', () => {
+  const kathmandu = createClock('Asia/Kathmandu')
+
+  assert.deepEqual(kathmandu(ms('2026-01-01T18:14:00Z')), { day: '2026-01-01', hour: 23 })
+  assert.deepEqual(kathmandu(ms('2026-01-01T18:16:00Z')), { day: '2026-01-02', hour: 0 })
+})
+
+test('an instant is plausible only as a finite time between 2020 and 2100', () => {
+  assert.equal(isPlausible(ms('2026-03-01T00:00:00Z')), true)
+  assert.equal(isPlausible(ms('2020-01-01T00:00:00Z')), true)
+  assert.equal(isPlausible(ms('2019-12-31T23:59:59Z')), false)
+  assert.equal(isPlausible(0), false)
+  assert.equal(isPlausible(ms('2100-01-01T00:00:00Z')), false)
+  assert.equal(isPlausible(1e20), false)
+  assert.equal(isPlausible(Number.NaN), false)
+  assert.equal(isPlausible('1770000000000'), false)
 })
 
 test('addDays moves across month, year and leap-day boundaries in both directions', () => {

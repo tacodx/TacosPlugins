@@ -7,6 +7,17 @@
 const QUARTER_HOUR = 15 * 60 * 1000
 const DAY = 24 * 60 * 60 * 1000
 
+// Claude Code did not exist before this, and no record is from the next century.
+const EARLIEST = Date.UTC(2020, 0, 1)
+const LATEST = Date.UTC(2100, 0, 1)
+
+/**
+ * Whether an instant can belong to a real record. One stray value near the epoch
+ * would stretch "all time" over twenty thousand days, and one far enough out
+ * cannot be formatted at all.
+ */
+export const isPlausible = (ms) => Number.isFinite(ms) && ms >= EARLIEST && ms < LATEST
+
 export function systemTimeZone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
