@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { STANDALONE_PLUGINS, vendorCore, vendoredPlugins } from '../../../scripts/release.mjs'
 
@@ -95,7 +95,7 @@ function sourceFiles(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) found.push(...sourceFiles(path))
-    else if (/\.(mjs|js|ts|tsx)$/.test(entry.name)) found.push(path)
+    else if (/\.(mjs|cjs|js|jsx|ts|tsx|mts|cts)$/.test(entry.name)) found.push(path)
   }
   return found
 }
@@ -104,9 +104,13 @@ function sourceFiles(dir) {
 // be dead code in the published plugin, and it would duplicate auth.mjs's OAuth client id
 // into a plugin that does no auth, which the pre-commit secret scan refuses.
 //
-// The second half is what keeps the exemption honest: a standalone plugin that later
-// starts importing from lib/ would publish exactly the unrunnable plugin described above.
-test('a standalone plugin is skipped by vendoring, has no lib/, and imports nothing from one', () => {
+// The second half is what keeps the exemption honest. A plugin is installed as its own
+// folder and nothing else, so an import that leaves it (packages/core, a sibling plugin's
+// lib/) works in this repo and fails once installed: exactly the unrunnable plugin
+// described above. Every relative import, in any spelling, must stay inside.
+const RELATIVE_IMPORT = /(?:from\s*|import\s*\(?\s*|require\s*\(\s*)['"](\.{1,2}\/[^'"]*)['"]/g
+
+test('a standalone plugin is skipped by vendoring, has no lib/, and imports nothing from outside itself', () => {
   const pluginsDir = join(ROOT, 'plugins')
 
   for (const plugin of STANDALONE_PLUGINS) {
@@ -116,11 +120,11 @@ test('a standalone plugin is skipped by vendoring, has no lib/, and imports noth
     assert.ok(!existsSync(join(dir, 'lib')), `plugins/${plugin}/lib exists — a standalone plugin must not carry packages/core`)
 
     for (const file of sourceFiles(dir)) {
-      assert.doesNotMatch(
-        readFileSync(file, 'utf8'),
-        /(?:from|import)\s*\(?\s*['"](?:\.\.?\/)+lib\//,
-        `${file} imports from lib/, which a standalone plugin does not have`,
-      )
+      for (const [, specifier] of readFileSync(file, 'utf8').matchAll(RELATIVE_IMPORT)) {
+        const target = resolve(dirname(file), specifier)
+        assert.ok(target.startsWith(dir + sep), `${file} imports ${specifier}, which is outside plugins/${plugin}`)
+        assert.ok(!target.startsWith(join(dir, 'lib') + sep), `${file} imports ${specifier} from lib/, which a standalone plugin does not have`)
+      }
     }
   }
 })
