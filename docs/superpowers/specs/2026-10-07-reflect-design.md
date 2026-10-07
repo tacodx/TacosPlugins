@@ -92,9 +92,16 @@ subagent runs are `<uuid>/subagents/**/agent-*.jsonl`.
 
 Record shapes that the indexer depends on:
 
-- **An assistant reply is stored once per content block.** Every such line carries the same
-  `message.id` and an identical `message.usage`. Counting lines inflates tokens; usage must be
-  taken once per `message.id` within a file.
+- **An assistant reply is stored once per content block**, every line carrying the same
+  `message.id`. Counting lines inflates tokens, so usage is taken once per `message.id`.
+- **Which line holds the real usage differs by file kind.** In a main file every line of a
+  reply repeats identical `message.usage`. In a subagent file the early lines hold the usage as
+  it stood mid-stream (`stop_reason` null, often one or two output tokens) and only the last
+  line has the final figures: 36,346 of 57,379 subagent replies differed, never downward, and
+  the last line was the largest in all 76,155 replies. This document first claimed the usage
+  was identical everywhere; an independent review of the built indexer measured otherwise.
+  Counting the first line read 35.7M output tokens where the final figures total 94.7M. Each
+  field is therefore counted as the largest value any line of the reply shows.
 - Assistant lines carry `timestamp`, `cwd`, `sessionId`, `entrypoint` (`claude-desktop` or
   `cli`), `effort`, `message.model` and `message.usage` with `input_tokens`, `output_tokens`,
   `cache_read_input_tokens`, `cache_creation_input_tokens`. A model named `<synthetic>` is not a
@@ -105,7 +112,12 @@ Record shapes that the indexer depends on:
   Its `message.content` is a string, or an array when the prompt carried an attachment
   (1,159 strings and 132 arrays in this data). Tool results are also `user` lines and are not
   prompts.
-- A `custom-title` line carries the session's title in `customTitle`.
+- A `custom-title` line carries the title the person gave a session in `customTitle`; an
+  `ai-title` line carries the one Claude Code made up in `aiTitle`. 28 of 175 sessions had
+  only the latter.
+- 98 other `user` lines in main files have no `origin` at all. Checked by shape: interruption
+  markers, compaction summaries, slash commands and their output. At most four could be typed
+  prompts, so the definition of a prompt stands.
 - Every record in a subagent file has `isSidechain: true`; no record in a main file does.
 - **Resumed sessions copy earlier records into the new file.** 138 of 76,079 replies appeared
   in two main files. Skipping main-file records whose `sessionId` differs from the file's own
@@ -203,7 +215,12 @@ DayAgg = {
 
 Rules, each with a test:
 
-- Usage is counted once per `message.id` per file. Tool calls once per `tool_use.id` per file.
+- Usage is counted once per `message.id` per file, each field as the largest value any line of
+  the reply shows, on the day of the reply's first line. Tool calls once per `tool_use.id` per
+  file.
+- A record whose time is unreadable or outside 2020 to 2100 is skipped and counted, as is a
+  parsed line that is not an object. The same window applies to `history.jsonl` and claude-mem.
+- A session's title is the person's own if there is one, otherwise Claude Code's.
 - In a main file, a record whose `sessionId` is not the file's own id is skipped.
 - `project` is the first `cwd` seen, made relative to the home directory, with a leading
   `Projects/` removed and anything from `/.claude/worktrees/` or `/.superpowers/` onward cut, so
@@ -218,14 +235,24 @@ Rules, each with a test:
 `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/reflect/store.json`, mode 600:
 
 ```
-{ version: 1,
+{ version: 2,
   root:     the projects folder this store was built from,
-  files:    { [path relative to projects/]: { size, mtimeMs, summary: FileSummary } },
+  scan:     { version, zone },      // the scanner version and time zone that made the summaries
+  files:    { [path below the project folder]: { size, mtimeMs, summary: FileSummary } },
   frozen:   { days: { [day]: { ...DayAgg, sessions, projects: { [name]: { prompts, out, sessions } } } } },
   sessions: [ { id, project, title, entrypoint, start, end, activeMs, prompts, out } ] }
 ```
 
-- A file is rescanned in full when its size or mtime differs from the record.
+- A file is rescanned in full when its size or mtime differs from the record. **Every file is
+  rescanned when `scan` differs** from the running scanner's version or the current time zone:
+  a fixed scanner must not leave old summaries behind, and days are local. What is already
+  frozen stays as it was made.
+- **A transcript is known by its path below the project folder**, `<session>.jsonl` or
+  `<session>/subagents/…`. The project folder is named after a working directory, so a
+  renamed project keeps its history instead of being folded and counted again, and a copied
+  one is counted once.
+- A store whose `version` is higher than this code's is not this code's to replace: the command
+  stops and touches nothing. Version 1, keyed by full path, was never released and is rebuilt.
 - **A file that is in the store but gone from disk is folded**: its summary is added into
   `frozen.days` and its record removed. A deleted transcript never returns, so this cannot
   double count, and it is what lets history outlive the 30-day cleanup while the store stays
@@ -235,12 +262,15 @@ Rules, each with a test:
   fold them all, and count them again when pointed back. And a `root` that is missing while the
   store still knows files in it is an error, not "everything was deleted".
 - `sessions` keeps one row per main session forever. It is what "longest session" reads.
-- Saved by writing a uniquely named temp file in the same directory, mode 600, then renaming.
-  The temp file is removed on any failure.
-- A lock file created with the `wx` flag guards the index step. A lock older than two minutes
-  is stale and is taken over. If the lock is held, the CLI skips indexing, answers from the
-  store as it stands, and adds a note to the View. The owner runs many sessions at once, so
-  this path is normal, not exceptional.
+- Saved by writing a uniquely named temp file in the same directory, mode 600, flushing it,
+  then renaming. The temp file is removed on any failure.
+- A lock file created with the `wx` flag guards the index step. It names its owner. It is
+  taken over at once when the owner's process is gone, and otherwise only when it is older
+  than ten minutes, which no run is. A release removes only the releaser's own lock. If the
+  lock is held, the CLI skips indexing, answers from the store as it stands, and adds a note
+  to the View. The owner runs many sessions at once, so this path is normal, not exceptional.
+  Two processes can still both take over one abandoned lock; each then writes a complete
+  store from the same disk, the later save wins, and nothing is counted twice.
 
 ### 6.3 Prompts before the transcripts begin
 
@@ -297,7 +327,10 @@ Retry button and changes nothing else in the session.
 |---|---|
 | `node` missing, or CLI exits non-zero or times out | Pane shows the reason and Retry |
 | stdout is not a valid View, or is truncated | Same |
-| `store.json` unreadable or wrong version | Moved aside as `store.corrupt-<time>.json`; rebuilt from files on disk; the pane says older history was lost |
+| `store.json` unreadable or of an older version | Rebuilt from files on disk; once the rebuild is in hand the old file is moved aside as `store.corrupt-<time>.json` and the pane says older history was lost. A rebuild that fails leaves the file in place, so the next run reports it again |
+| The same, while another session holds the lock | Nothing is moved or rebuilt; the note says another session is rebuilding |
+| `store.json` saved by a newer version | The command fails with the reason; the file is not touched |
+| A transcript put back after it was folded (restored from a backup) | Counted again. Accepted: it takes someone restoring deleted transcripts |
 | A transcript line does not parse, or has an unknown shape | Skipped and counted |
 | A file vanishes mid-scan | Counted as gone; an earlier record of it is folded in the same run |
 | No transcripts at all | Empty state, not an error |
@@ -323,6 +356,10 @@ message id; that is not worth it. The README states the figure.
   `process.run` event with a canned View, so no engine test reads real history.
 - **Every new test is mutation-checked**: break the code, see the test fail, restore. This
   repo's history shows five tests that could not fail.
+- **Mutation checks do not find a wrong fact.** All 77 breakages of the first build were
+  caught, and its headline number was still 62% low, because the tests encoded this document's
+  mistaken claim about usage (section 4.2). An independent reviewer who measured the real
+  transcripts found it. A claim in section 4 is only as good as the measurement behind it.
 - **Fixtures are synthetic.** No real transcript, prompt, project name or session title is ever
   committed: the repo is public.
 - **A test stays isolated even when the code under test is broken.** Every run of the command in

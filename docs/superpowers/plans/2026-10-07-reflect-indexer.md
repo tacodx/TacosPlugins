@@ -8,6 +8,8 @@
 
 **Tech Stack:** Plain ESM Node (`.mjs`), Node 22+, zero dependencies, `node --test`.
 
+> **Executed 2026-10-07.** The code blocks below are what was first built (commits `0684b72` to `21e8da7`). An independent review then changed it, most importantly how a reply's usage is counted: see commit `aab699b` and the spec's section 4.2. Read the repo, not this file, for what the code is now.
+
 **Spec:** `docs/superpowers/specs/2026-10-07-reflect-design.md`. Read sections 4.2, 6 and 8 first. Section 4.2 is measured fact about the data; where this plan and that section disagree, stop and report.
 
 ## Global Constraints
