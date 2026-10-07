@@ -249,8 +249,9 @@ Rules, each with a test:
   frozen stays as it was made.
 - **A transcript is known by its path below the project folder**, `<session>.jsonl` or
   `<session>/subagents/…`. The project folder is named after a working directory, so a
-  renamed project keeps its history instead of being folded and counted again, and a copied
-  one is counted once.
+  renamed project keeps its history instead of being folded and counted again. When several
+  paths are one transcript (a copied project folder), the largest file is the one counted,
+  since transcripts only grow, and the View carries a note saying copies exist.
 - A store whose `version` is higher than this code's is not this code's to replace: the command
   stops and touches nothing. Version 1, keyed by full path, was never released and is rebuilt.
 - **A file that is in the store but gone from disk is folded**: its summary is added into
@@ -263,7 +264,9 @@ Rules, each with a test:
   store still knows files in it is an error, not "everything was deleted".
 - `sessions` keeps one row per main session forever. It is what "longest session" reads.
 - Saved by writing a uniquely named temp file in the same directory, mode 600, flushing it,
-  then renaming. The temp file is removed on any failure.
+  then renaming. The write is all or nothing: a save that cannot write every byte fails and
+  leaves the store on disk as it was. The temp file is removed on any failure. An unusable
+  store is set aside by the save itself, after the new one is written.
 - A lock file created with the `wx` flag guards the index step. It names its owner. It is
   taken over at once when the owner's process is gone, and otherwise only when it is older
   than ten minutes, which no run is. A release removes only the releaser's own lock. If the
@@ -331,6 +334,8 @@ Retry button and changes nothing else in the session.
 | The same, while another session holds the lock | Nothing is moved or rebuilt; the note says another session is rebuilding |
 | `store.json` saved by a newer version | The command fails with the reason; the file is not touched |
 | A transcript put back after it was folded (restored from a backup) | Counted again. Accepted: it takes someone restoring deleted transcripts |
+| A project folder renamed while its session is still running | The session recreates the old path with only its new records, so the transcript is in two pieces under one name. The larger piece is counted, the smaller is not, and the View's note about copies is the sign. Accepted: joining them would need every reply's id kept for good |
+| Two sessions whose environments name the same time zone differently (`UTC`, `Etc/UTC`) | Each run remakes every summary. Costs time, changes no number. Accepted |
 | A transcript line does not parse, or has an unknown shape | Skipped and counted |
 | A file vanishes mid-scan | Counted as gone; an earlier record of it is folded in the same run |
 | No transcripts at all | Empty state, not an error |
