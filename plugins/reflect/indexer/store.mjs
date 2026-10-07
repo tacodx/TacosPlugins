@@ -1,7 +1,7 @@
 // The store: one summary per transcript file still on disk, a frozen total for
 // files that are gone, and one row per session. A single JSON file.
 import { randomUUID } from 'node:crypto'
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs'
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { addSummary } from './agg.mjs'
@@ -59,29 +59,33 @@ export function readStore(dir) {
   return { store: parsed, lost: null }
 }
 
-/** Moves an unusable store aside, so the next save does not overwrite the only copy of it. */
-export function quarantine(dir, now) {
-  renameSync(join(dir, STORE_FILE), join(dir, `store.corrupt-${now}.json`))
-}
-
 /**
  * Saves through a temp file that is always newly created (`wx`), so the mode is
  * always applied and a reader never sees half a store. The data is flushed
  * before the rename: the frozen total exists nowhere else, and a rename that
  * outlives a power cut must not point at an empty file.
+ *
+ * @param {{ setAside?: number }} [options] `setAside`: the store being replaced
+ *   is unusable; keep it as `store.corrupt-<setAside>.json`. It is moved only
+ *   once the new store is safely written, so a save that fails leaves it where
+ *   the next run will find it and say so again.
  */
-export function saveStore(dir, store) {
+export function saveStore(dir, store, { setAside } = {}) {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const path = join(dir, STORE_FILE)
   const temp = join(dir, `store.${process.pid}.${Date.now()}.tmp`)
   try {
     const fd = openSync(temp, 'wx', 0o600)
     try {
-      writeSync(fd, JSON.stringify(store))
+      // writeFileSync writes all of it or throws. A bare write may stop short on a
+      // full disk and report success, and the rename would then install a stump.
+      writeFileSync(fd, JSON.stringify(store))
       fsyncSync(fd)
     } finally {
       closeSync(fd)
     }
-    renameSync(temp, join(dir, STORE_FILE))
+    if (setAside !== undefined) renameSync(path, join(dir, `store.corrupt-${setAside}.json`))
+    renameSync(temp, path)
   } catch (err) {
     rmSync(temp, { force: true })
     throw err

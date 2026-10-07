@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -85,6 +85,27 @@ test('while another process holds the lock, view answers from the store as it st
   assert.equal(view.totals.out, 0) // nothing was indexed
   assert.equal(view.totals.prompts, 1) // the prompt history needs no lock
   assert.deepEqual(readdirSync(dataDir(config)), ['store.lock']) // nothing saved, the other lock left alone
+})
+
+// --now sets what "today" is for the view. Whether a lock is abandoned is a matter of real time.
+test('a lock is judged by the real clock, not by --now', async (t) => {
+  const config = configDir(t)
+  mkdirSync(dataDir(config), { recursive: true })
+  writeFileSync(join(dataDir(config), 'store.lock'), 'someone else')
+
+  const view = await viewOf(config, '--now', '2030-01-01T00:00:00Z')
+
+  assert.deepEqual(view.notes, [NOTE_BUSY])
+})
+
+test('a transcript that exists in two project folders is counted once, and the view says so', async (t) => {
+  const config = configDir(t)
+  cpSync(join(config, 'projects', '-home-u-Projects-demo'), join(config, 'projects', '-home-u-Projects-copy'), { recursive: true })
+
+  const view = await viewOf(config)
+
+  assert.equal(view.totals.out, 40)
+  assert.deepEqual(view.notes, ['1 transcript exists in more than one project folder; its larger copy is the one counted.'])
 })
 
 test('with no --range, the view covers thirty days', async (t) => {

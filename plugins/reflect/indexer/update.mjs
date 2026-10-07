@@ -89,13 +89,19 @@ export async function updateStore(store, root, { home, clock, zone, scan = scanF
   // of another time zone, are all remade. What is already frozen stays as it was.
   const isOutdated = store.scan === null || store.scan.version !== SCAN_VERSION || store.scan.zone !== zone
 
-  const present = new Set()
+  // Several paths can be one transcript: a copied project folder, or one renamed
+  // under a running session. Transcripts only grow, so the largest holds what the
+  // others do, and it alone is counted.
+  const chosen = new Map()
   for (const file of onDisk) {
     const key = identityOf(file.rel)
-    if (present.has(key)) {
-      result.duplicates += 1 // a copy of a transcript already counted in this run
-      continue
-    }
+    const best = chosen.get(key)
+    if (best === undefined || file.size > best.size) chosen.set(key, file)
+  }
+  result.duplicates = onDisk.length - chosen.size
+
+  const present = new Set()
+  for (const [key, file] of chosen) {
     const known = Object.hasOwn(store.files, key) ? store.files[key] : null
     if (!isOutdated && known !== null && known.size === file.size && known.mtimeMs === file.mtimeMs) {
       present.add(key)

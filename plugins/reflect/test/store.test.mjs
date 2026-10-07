@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { emptyDay } from '../indexer/agg.mjs'
 import {
@@ -10,7 +11,6 @@ import {
   emptyStore,
   foldFile,
   mergedDays,
-  quarantine,
   readStore,
   saveStore,
   STORE_VERSION,
@@ -18,6 +18,7 @@ import {
 } from '../indexer/store.mjs'
 import { tempDir } from './helpers.mjs'
 
+const STORE_MODULE = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'indexer', 'store.mjs')).href
 const STAT = { size: 10, mtimeMs: 1000 }
 const SESSION = { start: 100, end: 900, activeMs: 300, prompts: 2, out: 10 }
 const DAY = '2026-03-01'
@@ -160,8 +161,54 @@ test('an unusable store is reported and left in place until it is moved aside', 
   writeFileSync(path, JSON.stringify({ ...emptyStore(), version: STORE_VERSION - 1 }))
   assert.equal(readStore(dir).lost, 'wrong-version')
 
-  quarantine(dir, 1234)
-  assert.deepEqual(readdirSync(dir), ['store.corrupt-1234.json'])
+  // Saving over it sets it aside first, so the only copy of whatever it held is kept.
+  writeFileSync(path, 'not json')
+  saveStore(dir, emptyStore(), { setAside: 1234 })
+  assert.deepEqual(readdirSync(dir).sort(), ['store.corrupt-1234.json', 'store.json'])
+  assert.equal(readFileSync(join(dir, 'store.corrupt-1234.json'), 'utf8'), 'not json')
+  assert.deepEqual(readStore(dir), { store: emptyStore(), lost: null })
+})
+
+/** Runs saveStore on a store far over the limit, in a child whose files may not grow past a few kilobytes. */
+function saveUnderALimit(dir, options) {
+  const script = `
+    import { emptyStore, saveStore } from ${JSON.stringify(STORE_MODULE)}
+    const big = emptyStore()
+    big.sessions = Array.from({ length: 6000 }, (_, i) => ({ id: String(i).padStart(120, 'x') }))
+    try {
+      saveStore(${JSON.stringify(dir)}, big, ${JSON.stringify(options)})
+      console.log('saved')
+    } catch (err) {
+      console.log('failed ' + err.code)
+    }`
+  return spawnSync('sh', ['-c', 'ulimit -f 64; exec "$0" --input-type=module -e "$1"', process.execPath, script], {
+    encoding: 'utf8',
+  }).stdout.trim()
+}
+const needsShell = process.platform === 'win32' && 'needs a POSIX shell'
+
+// A file-size limit stands in for a full disk. A save that flushed but did not check
+// how much it had written once replaced a good store with the first 32 KB of a new one,
+// and said nothing.
+test('a save that cannot write everything fails and leaves the good store alone', { skip: needsShell }, (t) => {
+  const dir = tempDir(t)
+  const good = twoFiles()
+  saveStore(dir, good)
+
+  assert.equal(saveUnderALimit(dir, {}), 'failed EFBIG')
+
+  assert.deepEqual(readStore(dir), { store: good, lost: null })
+  assert.deepEqual(readdirSync(dir), ['store.json'])
+})
+
+test('an unreadable store is set aside only once the new one is safely written', { skip: needsShell }, (t) => {
+  const dir = tempDir(t)
+  writeFileSync(join(dir, 'store.json'), 'not json')
+
+  assert.equal(saveUnderALimit(dir, { setAside: 1234 }), 'failed EFBIG')
+
+  assert.deepEqual(readdirSync(dir), ['store.json'])
+  assert.equal(readFileSync(join(dir, 'store.json'), 'utf8'), 'not json')
 })
 
 // An old copy of this code may still be running in another session after an

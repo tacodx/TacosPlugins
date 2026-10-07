@@ -206,6 +206,19 @@ test('a copy of a project folder is counted once', async (t) => {
   assert.deepEqual(await updateStore(store, root, OPTIONS), { ...NOTHING, kept: 2, duplicates: 2 })
 })
 
+// Transcripts only ever grow, so of two files that claim to be the same transcript the
+// larger holds everything the smaller does. A stale copy must not hide the live file.
+test('of two copies of a transcript, the larger is the one that counts', async (t) => {
+  const root = tempDir(t)
+  seed(root)
+  cpSync(join(root, PROJECT), join(root, '-home-u-Projects-archive'), { recursive: true }) // sorts before the original
+  appendFileSync(join(root, MAIN), `${reply({ id: 'm3', session: 's1', at: at('10:01:00'), out: 100 })}\n`)
+  const store = emptyStore()
+
+  assert.deepEqual(await updateStore(store, root, OPTIONS), { ...NOTHING, scanned: 2, duplicates: 2 })
+  assert.equal(mergedDays(store)[DAY].out, 147)
+})
+
 test('a transcript is known by its path below the project folder', () => {
   assert.equal(identityOf('-home-u-Projects-demo/s1.jsonl'), 's1.jsonl')
   assert.equal(identityOf('-home-u-Projects-demo/s1/subagents/agent-a1.jsonl'), 's1/subagents/agent-a1.jsonl')

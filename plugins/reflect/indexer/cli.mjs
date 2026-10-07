@@ -11,7 +11,7 @@ import { createClock, systemTimeZone } from './clock.mjs'
 import { readHistory } from './history.mjs'
 import { readWork } from './mem.mjs'
 import { buildView, RANGES } from './query.mjs'
-import { acquireLock, mergedDays, quarantine, readStore, saveStore } from './store.mjs'
+import { acquireLock, mergedDays, readStore, saveStore } from './store.mjs'
 import { updateStore } from './update.mjs'
 
 const OPTIONS = ['range', 'projects', 'data', 'history', 'mem', 'now', 'tz', 'home']
@@ -64,14 +64,17 @@ async function view(options, env) {
     if (release === null) {
       notes.push(read.lost === null ? NOTE_BUSY : NOTE_BUSY_LOST)
     } else {
-      await updateStore(store, projects, { home, clock, zone })
-      // Moved aside only now, with the rebuild in hand: a run that fails before
-      // this leaves the file where it is, and the next run says so again.
-      if (read.lost !== null) {
-        quarantine(data, now)
-        notes.push(NOTE_LOST)
+      const updated = await updateStore(store, projects, { home, clock, zone })
+      // An unusable store is set aside by the save itself, once the rebuilt one is
+      // safely written: a run that fails before then leaves the file where it is,
+      // and the next run says so again.
+      saveStore(data, store, read.lost === null ? {} : { setAside: now })
+      if (read.lost !== null) notes.push(NOTE_LOST)
+      if (updated.duplicates === 1) {
+        notes.push('1 transcript exists in more than one project folder; its larger copy is the one counted.')
+      } else if (updated.duplicates > 1) {
+        notes.push(`${updated.duplicates} transcripts exist in more than one project folder; the larger copy of each is the one counted.`)
       }
-      saveStore(data, store)
     }
   } finally {
     if (release !== null) release()
