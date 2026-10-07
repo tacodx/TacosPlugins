@@ -283,6 +283,26 @@ test('suggestions written earlier for the same range and day are shown without a
   expect(asked).toBe(0)
 })
 
+test('suggestions written for one range are not shown for another', async ($, on) => {
+  on('process.run', async (_$, e) => {
+    const id = e.argv.at(-1)
+    return id === '7d' ? printed({ range: { id, from: '2026-03-04', to: '2026-03-10', days: 7 } }) : printed()
+  })
+  on('model.complete', async () => ({ value: { isAnswered: true, text: '- about thirty days', usage: USAGE } }))
+  mock.store(on)
+  const ui = await mounted($)
+  await ui.press({ key: 'range-30d' })
+  await ui.press({ key: 'tab-tips' })
+  await ui.press({ key: 'tips-write' })
+  expect((await ui.find({ key: 'tips-text' }))?.text).toMatch(/about thirty days/)
+
+  await ui.press({ key: 'range-7d' })
+  await ui.press({ key: 'tab-tips' })
+
+  expect(await ui.find({ key: 'tips-text' })).toBeUndefined()
+  expect((await ui.find({ key: 'tips-write' }))?.props.label).toBe('Write suggestions')
+})
+
 test('a model call that is not answered says so', async ($, on) => {
   on('process.run', async () => printed())
   on('model.complete', async () => ({ value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error', usage: USAGE } }))
