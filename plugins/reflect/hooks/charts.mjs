@@ -41,12 +41,24 @@ function close(parts) {
   return `${open(20)}<text x="0" y="13">Too much to draw here.</text></svg>`
 }
 
-// The next 1, 2 or 5 times a power of ten, so the axis ends on a round number.
+// The top of the axis: the next round number, from a ladder fine enough that the
+// tallest column fills most of the plot. The middle gridline is labelled with half
+// of it, so every rung has a half that is itself round, and below ten only even
+// tops are used (half of five prompts is no number of prompts).
+const LADDER = [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]
+const SMALL_LADDER = [2, 4, 6, 8, 10]
 function niceMax(value) {
-  if (value <= 0) return 1
+  if (value <= 0) return 2
   const power = 10 ** Math.floor(Math.log10(value))
-  const lead = value / power
-  return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * power
+  const ladder = power < 10 ? SMALL_LADDER : LADDER
+  return Math.round(ladder.find((step) => value / power <= step) * power)
+}
+
+// A column is at most this wide, however few there are, and sits in the middle of its slot.
+const MAX_BAR = 24
+function slot(i, step, gap, left) {
+  const width = Math.min(MAX_BAR, Math.max(1, step - gap))
+  return { x: left + i * step + (step - width) / 2, width }
 }
 
 // The frame every column chart shares: three gridlines with their values, and
@@ -99,10 +111,10 @@ export function columnChart(columns, format, unit) {
 
   columns.forEach((each, i) => {
     if (each.value <= 0) return
-    const width = Math.max(1, step - gap)
+    const { x, width } = slot(i, step, gap, frame.left)
     const height = Math.max(1.5, (each.value / max) * frame.plot)
     parts.push(
-      `<rect class="s1 mark" x="${(frame.left + i * step + gap / 2).toFixed(1)}" y="${(frame.top + frame.plot - height).toFixed(1)}" ` +
+      `<rect class="s1 mark" x="${x.toFixed(1)}" y="${(frame.top + frame.plot - height).toFixed(1)}" ` +
         `width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="${Math.min(2, width / 2).toFixed(1)}">` +
         `<title>${esc(each.title)}: ${esc(format(each.value))} ${esc(unit)}</title></rect>`,
     )
@@ -127,6 +139,7 @@ export function stackedColumnChart(columns, names, format, nameOf = (name) => na
   columnFrame(parts, columns, max, format, frame)
 
   columns.forEach((each, i) => {
+    const { x, width } = slot(i, step, gap, frame.left)
     let y = frame.top + frame.plot
     names.forEach((name, series) => {
       const value = each.values[name] ?? 0
@@ -134,8 +147,8 @@ export function stackedColumnChart(columns, names, format, nameOf = (name) => na
       const height = (value / max) * frame.plot
       y -= height
       parts.push(
-        `<rect class="${colourOf(name, series)} mark" x="${(frame.left + i * step + gap / 2).toFixed(1)}" y="${y.toFixed(1)}" ` +
-          `width="${Math.max(1, step - gap).toFixed(1)}" height="${Math.max(0.5, height - 0.5).toFixed(1)}">` +
+        `<rect class="${colourOf(name, series)} mark" x="${x.toFixed(1)}" y="${y.toFixed(1)}" ` +
+          `width="${width.toFixed(1)}" height="${Math.max(0.5, height - 0.5).toFixed(1)}">` +
           `<title>${esc(each.title)}, ${esc(nameOf(name))}: ${esc(format(value))}</title></rect>`,
       )
     })
@@ -207,7 +220,11 @@ export function calendarChart({ weeks, months }, unit) {
   return close(parts)
 }
 
-/** Ranked horizontal bars. @param {{ name: string, value: number }[]} rows */
+/**
+ * Ranked horizontal bars.
+ * @param {{ name: string, value: number, label?: string }[]} rows `label` is drawn in place of
+ *   a long `name`, which stays in the tooltip
+ */
 export function rankBars(rows, format) {
   const rowHeight = 20
   const labelWidth = 124
@@ -220,7 +237,7 @@ export function rankBars(rows, format) {
   rows.forEach((each, i) => {
     const y = i * rowHeight
     const width = Math.max(1.5, (each.value / max) * barWidth)
-    parts.push(`<text class="ink" x="0" y="${y + 13}">${esc(shorten(each.name, 20))}<title>${esc(each.name)}</title></text>`)
+    parts.push(`<text class="ink" x="0" y="${y + 13}">${esc(shorten(each.label ?? each.name, 18))}<title>${esc(each.name)}</title></text>`)
     parts.push(
       `<rect class="s1 mark" x="${labelWidth}" y="${y + 4}" width="${width.toFixed(1)}" height="10" rx="2">` +
         `<title>${esc(each.name)}: ${esc(format(each.value))}</title></rect>`,

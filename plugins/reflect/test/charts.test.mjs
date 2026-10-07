@@ -33,6 +33,25 @@ test('a column chart draws one mark per column that has a value, each with its t
   assert.ok(svg.includes('>1 Mar</text>') && svg.includes('>3 Mar</text>'))
 })
 
+test('the axis tops out just above the tallest column, and a small count never gets a top whose half is no count', () => {
+  const topOf = (value) => /<text[^>]*text-anchor="end">([^<]+)<\/text>/g.exec(columnChart([column('a', value)], String, 'things').split('y2=').at(-1))[1]
+
+  assert.equal(topOf(11_400_000), '12000000')
+  assert.equal(topOf(4_900_000), '5000000')
+  assert.equal(topOf(95), '100')
+  assert.equal(topOf(1), '2')
+  assert.equal(topOf(5), '6')
+  assert.equal(topOf(7), '8')
+})
+
+test('a column is never wider than a bar should be, and sits in the middle of its slot', () => {
+  const svg = columnChart([column('Sep 2026', 9000), column('Oct 2026', 900)], String, 'notes')
+  const bars = [...svg.matchAll(/<rect class="s1 mark" x="([\d.]+)"[^>]* width="([\d.]+)"/g)].map((match) => ({ x: Number(match[1]), width: Number(match[2]) }))
+
+  assert.deepEqual(bars.map((bar) => bar.width), [24, 24])
+  assert.equal(bars[0].x + 12, 34 + 163 / 2) // the middle of the first of two slots, 163 units each
+})
+
 test('a chart with nothing in it is still a drawing', () => {
   assertDrawing(columnChart([], tokens, 'output tokens'))
   assertDrawing(stackedColumnChart([], [], tokens))
@@ -121,7 +140,11 @@ test('ranked bars are as long as their share of the largest, and long names are 
   assertDrawing(svg)
   assert.equal(widths.length, 2)
   assert.equal(widths[1] * 2, widths[0])
-  assert.ok(svg.includes('a-project-with-quit…<title>a-project-with-quite-a-long-name</title>'))
+  assert.ok(svg.includes('a-project-with-qu…<title>a-project-with-quite-a-long-name</title>'))
+
+  const labelled = rankBars([{ name: 'mcp__github__create_issue', label: 'github: create_issue', value: 1 }], String)
+  assert.ok(labelled.includes('github: create_is…<title>mcp__github__create_issue</title>'))
+  assert.ok(labelled.includes('<title>mcp__github__create_issue: 1</title>'))
 })
 
 test('a share bar says what part each piece is, and a sliver is not 0%', () => {

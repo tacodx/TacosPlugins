@@ -4,7 +4,14 @@ import { count, percent, plural } from '../format.mjs'
 import { chart, pair, tile } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
 
-const rows = (list: Ranked[]) => list.map((each) => ({ name: each.name, value: each.n }))
+// A tool of an MCP server is named mcp__<server>__<tool>, and a skill <plugin>:<skill>.
+// Both lead with the part that is the same down the whole list.
+const short = (name: string) => {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  if (mcp !== null) return `${mcp[1]}: ${mcp[2]}`
+  return name.includes(':') ? name.slice(name.lastIndexOf(':') + 1) : name
+}
+const rows = (list: Ranked[]) => list.map((each) => ({ name: each.name, label: short(each.name), value: each.n }))
 
 export function tools(el: Desktop, view: View) {
   const { Box } = el

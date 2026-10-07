@@ -32,7 +32,7 @@ export function activity(el: Desktop, view: View) {
       )}
       {chart(el, 'calendar', 'Prompts per day', calendarChart(calendarOf(view.days), 'prompts'), `A calendar of prompts per day since ${dayLabel(view.range.from)}, ${count(t.prompts)} in all`)}
       {chart(el, 'prompts', 'Prompts over time', columnChart(prompts, count, 'prompts'), `Prompts over time, ${count(t.prompts)} in all`)}
-      {chart(el, 'sessions', 'Sessions at work per day', columnChart(sessions, count, 'sessions'), `Sessions with activity per day, ${count(t.sessions)} started in this range`)}
+      {chart(el, 'sessions', 'Sessions at work', columnChart(sessions, count, 'sessions at work'), `Sessions with activity over time, ${count(t.sessions)} started in this range`)}
       {lines(el, 'longest', 'Longest sessions', view.sessions.longest.length > 0 ? view.sessions.longest.map(sessionLine) : ['None in this range.'])}
       {lines(el, 'most-prompts', 'Most prompts in one session', view.sessions.mostPrompts.length > 0 ? view.sessions.mostPrompts.map(sessionLine) : ['None in this range.'])}
     </Box>
