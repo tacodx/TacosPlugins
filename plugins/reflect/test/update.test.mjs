@@ -219,6 +219,74 @@ test('of two copies of a transcript, the larger is the one that counts', async (
   assert.equal(mergedDays(store)[DAY].out, 147)
 })
 
+// The mirror of the case above: here the stale copy sorts last. Together the two pin
+// "the largest", not "the first" and not "the last".
+test('the larger copy counts wherever it sorts', async (t) => {
+  const root = tempDir(t)
+  seed(root)
+  cpSync(join(root, PROJECT), join(root, '-home-u-Projects-zcopy'), { recursive: true }) // sorts after the original
+  appendFileSync(join(root, MAIN), `${reply({ id: 'm3', session: 's1', at: at('10:01:00'), out: 100 })}\n`)
+  const store = emptyStore()
+
+  await updateStore(store, root, OPTIONS)
+
+  assert.equal(mergedDays(store)[DAY].out, 147)
+})
+
+test('one transcript in three folders is one copied transcript, not two', async (t) => {
+  const root = tempDir(t)
+  write(root, MAIN, [reply({ id: 'm1', session: 's1', at: at('10:00:00'), out: 40 })])
+  cpSync(join(root, PROJECT), join(root, '-home-u-Projects-b'), { recursive: true })
+  cpSync(join(root, PROJECT), join(root, '-home-u-Projects-c'), { recursive: true })
+
+  assert.deepEqual(await updateStore(emptyStore(), root, OPTIONS), { ...NOTHING, scanned: 1, duplicates: 1 })
+})
+
+// Transcripts only grow, so a file smaller than the one already summarised is not that
+// file but a stale copy that outlived it. Its summary must not replace the fuller one.
+test('when the larger copy is deleted, the stale one left behind does not shrink the history', async (t) => {
+  const root = tempDir(t)
+  seed(root)
+  const archive = join(root, '-home-u-Projects-archive')
+  cpSync(join(root, PROJECT), archive, { recursive: true })
+  appendFileSync(join(root, MAIN), `${reply({ id: 'm3', session: 's1', at: at('10:01:00'), out: 100 })}\n`)
+  const store = emptyStore()
+  await updateStore(store, root, OPTIONS)
+  const full = mergedDays(store)
+  assert.equal(full[DAY].out, 147)
+
+  rmSync(join(root, PROJECT), { recursive: true }) // the grown original goes, the stale copy stays
+  assert.deepEqual(await updateStore(store, root, OPTIONS), { ...NOTHING, kept: 2 })
+  assert.deepEqual(mergedDays(store), full)
+
+  rmSync(archive, { recursive: true }) // now nothing is left on disk: what was known is folded, once
+  assert.deepEqual(await updateStore(store, root, OPTIONS), { ...NOTHING, folded: 2 })
+  assert.deepEqual(mergedDays(store), full)
+})
+
+// The copy to read is chosen from the listing. If it is deleted before it is read while
+// another copy is still there, the transcript is not gone and must not be folded: the
+// next run would read the other copy as new and count it a second time, for good.
+test('a chosen copy that vanishes mid-run is not folded while another copy is listed', async (t) => {
+  const root = tempDir(t)
+  seed(root)
+  cpSync(join(root, PROJECT), join(root, '-home-u-Projects-archive'), { recursive: true })
+  const store = emptyStore()
+  await updateStore(store, root, OPTIONS)
+  appendFileSync(join(root, MAIN), `${reply({ id: 'm3', session: 's1', at: at('10:01:00'), out: 100 })}\n`)
+
+  const gone = Object.assign(new Error('gone'), { code: 'ENOENT' })
+  const failing = async (path, options) => {
+    if (path === join(root, MAIN)) throw gone
+    return scanFile(path, options)
+  }
+  assert.deepEqual(await updateStore(store, root, { ...OPTIONS, scan: failing }), { ...NOTHING, kept: 2, vanished: 1, duplicates: 2 })
+
+  await updateStore(store, root, OPTIONS)
+  assert.equal(mergedDays(store)[DAY].out, 147)
+  assert.equal(mergedDays(store)[DAY].sessions, 1)
+})
+
 test('a transcript is known by its path below the project folder', () => {
   assert.equal(identityOf('-home-u-Projects-demo/s1.jsonl'), 's1.jsonl')
   assert.equal(identityOf('-home-u-Projects-demo/s1/subagents/agent-a1.jsonl'), 's1/subagents/agent-a1.jsonl')

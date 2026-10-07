@@ -70,6 +70,7 @@ export async function scanFile(path, options) {
  * @param {{ home: string, clock: Function, zone: string, scan?: Function }} options
  *   `zone` names the time zone `clock` works in; it is remembered with the summaries
  * @returns {Promise<{ scanned: number, kept: number, folded: number, vanished: number, duplicates: number }>}
+ *   `duplicates` is the number of transcripts found at more than one path
  */
 export async function updateStore(store, root, { home, clock, zone, scan = scanFile }) {
   // A fold cannot be undone. A store pointed at another folder would see every
@@ -93,17 +94,27 @@ export async function updateStore(store, root, { home, clock, zone, scan = scanF
   // under a running session. Transcripts only grow, so the largest holds what the
   // others do, and it alone is counted.
   const chosen = new Map()
+  const copies = new Map() // key -> how many paths claim to be that transcript
   for (const file of onDisk) {
     const key = identityOf(file.rel)
+    copies.set(key, (copies.get(key) ?? 0) + 1)
     const best = chosen.get(key)
     if (best === undefined || file.size > best.size) chosen.set(key, file)
   }
-  result.duplicates = onDisk.length - chosen.size
+  for (const count of copies.values()) if (count > 1) result.duplicates += 1
 
   const present = new Set()
   for (const [key, file] of chosen) {
     const known = Object.hasOwn(store.files, key) ? store.files[key] : null
     if (!isOutdated && known !== null && known.size === file.size && known.mtimeMs === file.mtimeMs) {
+      present.add(key)
+      result.kept += 1
+      continue
+    }
+    // A file smaller than the one already summarised is not that file: it is a
+    // stale copy that outlived the larger one. The fuller summary stays, and is
+    // folded once this copy is gone as well.
+    if (!isOutdated && known !== null && file.size < known.size) {
       present.add(key)
       result.kept += 1
       continue
@@ -114,7 +125,14 @@ export async function updateStore(store, root, { home, clock, zone, scan = scanF
       summary = await scan(file.path, { kind, fileId: basename(file.rel, '.jsonl'), home, clock })
     } catch (err) {
       if (err.code !== 'ENOENT') throw err
-      result.vanished += 1 // deleted between the listing and the read: it is folded below if we knew it
+      // Deleted between the listing and the read. If we knew it, it is folded below,
+      // unless another copy was listed: then the transcript is not gone, and folding
+      // it would have the next run count that copy on top of the frozen one.
+      result.vanished += 1
+      if (copies.get(key) > 1) {
+        present.add(key)
+        if (known !== null) result.kept += 1
+      }
       continue
     }
     present.add(key)

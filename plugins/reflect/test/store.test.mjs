@@ -169,6 +169,20 @@ test('an unusable store is reported and left in place until it is moved aside', 
   assert.deepEqual(readStore(dir), { store: emptyStore(), lost: null })
 })
 
+// The new store goes in with one rename, so there is no moment without a store.json:
+// the old file is copied aside, not moved. If the copy cannot be made, nothing changes.
+test('setting a store aside never leaves the folder without one', (t) => {
+  const dir = tempDir(t)
+  writeFileSync(join(dir, 'store.json'), 'not json')
+  writeFileSync(join(dir, 'store.corrupt-1234.json'), 'an earlier keepsake')
+
+  assert.throws(() => saveStore(dir, emptyStore(), { setAside: 1234 }), { code: 'EEXIST' })
+
+  assert.deepEqual(readdirSync(dir).sort(), ['store.corrupt-1234.json', 'store.json'])
+  assert.equal(readFileSync(join(dir, 'store.json'), 'utf8'), 'not json')
+  assert.equal(readFileSync(join(dir, 'store.corrupt-1234.json'), 'utf8'), 'an earlier keepsake')
+})
+
 /** Runs saveStore on a store far over the limit, in a child whose files may not grow past a few kilobytes. */
 function saveUnderALimit(dir, options) {
   const script = `

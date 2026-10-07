@@ -108,6 +108,18 @@ test('a transcript that exists in two project folders is counted once, and the v
   assert.deepEqual(view.notes, ['1 transcript exists in more than one project folder; its larger copy is the one counted.'])
 })
 
+test('the note about copies counts transcripts', async (t) => {
+  const config = configDir(t)
+  const project = join(config, 'projects', '-home-u-Projects-demo')
+  writeFileSync(join(project, 's2.jsonl'), `${reply({ id: 'm2', session: 's2', at: '2026-03-09T11:00:00.000Z', out: 1 })}\n`)
+  cpSync(project, join(config, 'projects', '-home-u-Projects-copy'), { recursive: true })
+
+  const view = await viewOf(config)
+
+  assert.equal(view.totals.out, 41)
+  assert.deepEqual(view.notes, ['2 transcripts exist in more than one project folder; the larger copy of each is the one counted.'])
+})
+
 test('with no --range, the view covers thirty days', async (t) => {
   const config = configDir(t)
 

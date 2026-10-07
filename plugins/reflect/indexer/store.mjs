@@ -1,7 +1,7 @@
 // The store: one summary per transcript file still on disk, a frozen total for
 // files that are gone, and one row per session. A single JSON file.
 import { randomUUID } from 'node:crypto'
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, copyFileSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { addSummary } from './agg.mjs'
@@ -66,9 +66,10 @@ export function readStore(dir) {
  * outlives a power cut must not point at an empty file.
  *
  * @param {{ setAside?: number }} [options] `setAside`: the store being replaced
- *   is unusable; keep it as `store.corrupt-<setAside>.json`. It is moved only
- *   once the new store is safely written, so a save that fails leaves it where
- *   the next run will find it and say so again.
+ *   is unusable; keep a copy of it as `store.corrupt-<setAside>.json`. The copy
+ *   is made only once the new store is safely written, and the old file stays
+ *   in place until the one rename that replaces it, so a save that fails at any
+ *   point leaves it where the next run will find it and say so again.
  */
 export function saveStore(dir, store, { setAside } = {}) {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -84,7 +85,7 @@ export function saveStore(dir, store, { setAside } = {}) {
     } finally {
       closeSync(fd)
     }
-    if (setAside !== undefined) renameSync(path, join(dir, `store.corrupt-${setAside}.json`))
+    if (setAside !== undefined) copyFileSync(path, join(dir, `store.corrupt-${setAside}.json`), constants.COPYFILE_EXCL)
     renameSync(temp, path)
   } catch (err) {
     rmSync(temp, { force: true })
