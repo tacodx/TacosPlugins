@@ -1,8 +1,9 @@
 # TacosPlugins — `reflect` design
 
 **Date:** 2026-10-07
-**Status:** Design approved in conversation, not yet implemented. Section 11 lists what a spike
-must confirm before the plan is written; the spike may revise this document.
+**Status:** Design approved in conversation, not yet implemented. The indexer has a plan,
+`docs/superpowers/plans/2026-10-07-reflect-indexer.md`. Section 11 lists what a spike must
+confirm before the mod's plan is written; the spike may revise this document.
 **Scope:** The third TacosPlugins plugin and the first that is a *mod*: code that runs inside
 Claude Code and draws its own interface. Does not use `packages/core`.
 
@@ -116,7 +117,8 @@ Other sources:
   `sessionId`. 5,164 prompts over 124 days, 2026-03-15 onward. **It effectively stops on
   2026-09-05**: desktop sessions do not write to it. On 2026-09-04, where both sources are
   complete, it has 83 prompts and the transcripts have 82.
-- `~/.claude-mem/claude-mem.db` (SQLite, only present with the claude-mem plugin): table
+- `claude-mem.db` in `CLAUDE_MEM_DATA_DIR` or `~/.claude-mem` (SQLite, only present with the
+  claude-mem plugin): table
   `observations` with `project`, `type`, `title`, `created_at_epoch`; 17,741 rows from
   2026-03-28. `type` is one of discovery, change, feature, bugfix, decision, verification,
   refactor, milestone, measurement, progress. The `concepts` column holds generic tags such as
@@ -153,9 +155,12 @@ plugins/reflect/
   hooks/charts/*.mjs             numbers -> SVG string; pure, no Node, no engine
   types/index.d.ts               the $.state contract
   indexer/cli.mjs                `node cli.mjs view --range <id>` -> one View as JSON on stdout
+  indexer/clock.mjs              instant -> local day and hour; day arithmetic
+  indexer/agg.mjs                aggregate shapes; how one file adds into a day
   indexer/scan.mjs               lines of one transcript -> FileSummary; pure
-  indexer/store.mjs              load, merge, fold, save atomically
-  indexer/query.mjs              (store, range, now) -> View; pure
+  indexer/store.mjs              read, save atomically, lock, fold, merge
+  indexer/update.mjs             rescan what changed, fold what is gone
+  indexer/query.mjs              (merged days, sessions, sources, range) -> View; pure
   indexer/history.mjs            history.jsonl -> prompts per day and hour
   indexer/mem.mjs                claude-mem via the `sqlite3` CLI, read-only -> work mix
   test/*.test.mjs                node --test: indexer and charts
@@ -201,8 +206,8 @@ Rules, each with a test:
 - `project` is the first `cwd` seen, made relative to the home directory, with a leading
   `Projects/` removed and anything from `/.claude/worktrees/` or `/.superpowers/` onward cut, so
   a worktree counts toward its parent project.
-- `activeMs` sums the gaps between consecutive records of a main file that are under five
-  minutes. It measures how long the session was busy, including Claude working unattended, and
+- `activeMs` sums the gaps under five minutes between consecutive records the scanner reads
+  (replies and prompts) in a main file. It measures how long the session was busy, including Claude working unattended, and
   the interface labels it that way.
 - `msgs` counts replies from main files and `subMsgs` those from subagent files.
 
@@ -212,6 +217,7 @@ Rules, each with a test:
 
 ```
 { version: 1,
+  root:     the projects folder this store was built from,
   files:    { [path relative to projects/]: { size, mtimeMs, summary: FileSummary } },
   frozen:   { days: { [day]: { ...DayAgg, sessions, projects: { [name]: { prompts, out, sessions } } } } },
   sessions: [ { id, project, title, entrypoint, start, end, activeMs, prompts, out } ] }
@@ -222,6 +228,10 @@ Rules, each with a test:
   `frozen.days` and its record removed. A deleted transcript never returns, so this cannot
   double count, and it is what lets history outlive the 30-day cleanup while the store stays
   small.
+- **A fold cannot be undone, so two guards stand in front of it.** A store refuses to be updated
+  from any folder other than its `root`: pointed elsewhere it would see every file as deleted,
+  fold them all, and count them again when pointed back. And a `root` that is missing while the
+  store still knows files in it is an error, not "everything was deleted".
 - `sessions` keeps one row per main session forever. It is what "longest session" reads.
 - Saved by writing a uniquely named temp file in the same directory, mode 600, then renaming.
   The temp file is removed on any failure.
@@ -253,7 +263,8 @@ Definitions the query must follow exactly:
 - **A range of N days** is today and the N−1 days before it, in local time. "All" starts at
   the earliest day any source has.
 - **A day's `sessions`** is the number of main files with at least one record that day.
-  **Sessions in a range** is the number of session rows whose `start` falls in the range.
+  **Sessions in a range** is the number of session rows whose `start` falls in the range, and
+  a project's session count is taken from the same rows.
 - **An active day** has at least one prompt.
 - **The current streak** is the run of consecutive active days ending today, or ending
   yesterday when today has no prompt yet. **The best streak** is the longest run ever. Both are
@@ -286,8 +297,9 @@ Retry button and changes nothing else in the session.
 | stdout is not a valid View, or is truncated | Same |
 | `store.json` unreadable or wrong version | Moved aside as `store.corrupt-<time>.json`; rebuilt from files on disk; the pane says older history was lost |
 | A transcript line does not parse, or has an unknown shape | Skipped and counted |
-| A file vanishes mid-scan | Skipped this run, folded on the next |
+| A file vanishes mid-scan | Counted as gone; an earlier record of it is folded in the same run |
 | No transcripts at all | Empty state, not an error |
+| The transcripts folder is missing, or is not the one the store was built from, while the store knows files | The command fails with the reason; nothing is folded |
 | `history.jsonl` or claude-mem missing, or `sqlite3` not installed | That source is absent; the Work tab explains why it is empty |
 | Tips call not answered | The reason is shown; nothing is cached |
 
@@ -311,6 +323,10 @@ message id; that is not worth it. The README states the figure.
   repo's history shows five tests that could not fail.
 - **Fixtures are synthetic.** No real transcript, prompt, project name or session title is ever
   committed: the repo is public.
+- **A test stays isolated even when the code under test is broken.** Every run of the command in
+  a test gets its own `CLAUDE_CONFIG_DIR` and `CLAUDE_MEM_DATA_DIR`, usage-error cases included,
+  and mutation checks run with a throwaway `HOME`. While the indexer's plan was being written, a
+  mutated argument parser let a usage-error test index the real `~/.claude`.
 - **`npm test` becomes `node --test "**/*.test.mjs"`** so the engine tests are not picked up by
   Node. The count must stay at 262 plus the new tests.
 - CI keeps running `npm test` only. Engine tests and `claude plugin validate` are a local gate
