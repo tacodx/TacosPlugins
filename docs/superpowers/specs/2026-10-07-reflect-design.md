@@ -129,8 +129,11 @@ Other sources:
 - `npm test` is a bare `node --test`. **On Node 22.22.2 that also runs `*.test.ts`**, and an
   engine test fails there with `ERR_MODULE_NOT_FOUND: Cannot find package 'claude-code'`.
   `node --test "a/**/*.test.mjs"` runs only the `.mjs` tests.
-- `scripts/release.mjs` vendors `packages/core/*.mjs` into **every** `plugins/*/lib/`, and
-  `release.test.mjs` asserts that for every directory under `plugins/`.
+- `scripts/release.mjs` vendored `packages/core/*.mjs` into **every** `plugins/*/lib/`, and
+  `release.test.mjs` asserted that for every directory under `plugins/`. `reflect` uses none
+  of it, and committing a copy was refused by the owner's pre-commit gitleaks hook: `auth.mjs`
+  holds an OAuth client id. The indexer plan's first task therefore makes `reflect` a
+  *standalone* plugin that the release script skips and that has no `lib/`.
 - Baseline before this work: 262 tests, all passing.
 - Plugin state lives under `${CLAUDE_CONFIG_DIR:-~/.claude}/tacos/`.
 - The marketplace is installed here from GitHub, so a plugin reaches normal sessions only once
@@ -166,7 +169,6 @@ plugins/reflect/
   test/*.test.mjs                node --test: indexer and charts
   test/*.test.ts                 claude plugin test: the mod
   test/fixtures/                 synthetic transcripts only
-  lib/                           vendored core, unused; kept so the repo invariant holds
   README.md
 ```
 
@@ -358,13 +360,27 @@ A throwaway mod with one command, one pane and one chart, loaded in the desktop 
 | S6 | Can the session's mod folder be a symlink into this repo, so edits here hot-reload? | Develop in the mod folder and copy |
 | S7 | Is `/reflect` free, and is `reflect` accepted as a plugin name? | Rename before anything depends on it |
 | S8 | Does `$.state` accept a View-sized value (tens of kilobytes)? | Keep the View in a module variable and refetch on reload |
-| S9 | Does `claude plugin validate` accept the unused vendored `lib/`? | Exempt this plugin in `release.mjs` and its test |
+| S9 | Does `claude plugin validate` accept an unused vendored `lib/`? | Moot: `reflect` carries no `lib/` (section 12) |
 | S10 | Does JSX work in an imported `.tsx` module that is handed the element table as an argument? | Tab modules return plain data and `register.tsx` builds every tree |
 
-## 12. Open questions for the owner
+### Spike results so far (2026-10-07)
 
-- **The unused `lib/`.** Keeping the "every plugin vendors core" invariant costs eleven dead
-  files in this plugin. The alternative is an exemption in `release.mjs` and `release.test.mjs`.
-  This design keeps the invariant because it changes no shared tooling.
+Read from a file the spike mod wrote, in the owner's desktop Code tab, Claude Code 2.1.289:
+
+| # | Answer |
+|---|---|
+| S1 | Partly. Opened unasked, the pane is placed in the dock at **38 body columns** of a 66-column, 55-row viewport, with 48 body rows. Its width in pixels and how an `Svg` scales are still unseen. |
+| S4 | Yes. `$.process.run(["node", …])` reached Node 22.22.2 and answered in 117 ms. |
+| S5 | Yes. Work left running by the hook finished and its state write redrew the pane. |
+| S6 | Yes. A mod folder that is a symlink loads; `$.plugin.root` is the link's path, not its target. |
+| S7 | Yes. `/reflect` registered, and `claude plugin validate` accepts the plugin name `reflect`. |
+| S8 | Yes. `$.state` held a 61 KB value. An all-time View is about 100 KB, still to be tried. |
+| S2, S3, S10 | Not yet seen: they need someone to look at the pane. |
+
+## 12. Decisions that were open
+
+- **No `lib/` in this plugin.** The alternative, keeping the "every plugin vendors core"
+  invariant at the cost of eleven dead files, was this design's first choice. The pre-commit
+  secret scan settled it the other way (section 4.3).
 - **Raising `cleanupPeriodDays`.** Not needed once the store exists, and not this plugin's
   setting to change.

@@ -21,7 +21,9 @@
 - **Mutation-check every test**: break the code, confirm the test fails, restore. State the mutation and the result in your report. Five tests in this repo once passed with the implementation deliberately broken.
 - **Never assert inside an injected stub.** Record what the stub received, let the call return, then assert.
 - **Keys that come from data are never read as plain properties.** Tool names, model names and project names index maps; `map.constructor` is a function on every object. Use `own`, `bump` and `Object.hasOwn`.
-- **`plugins/*/lib/` is tracked in git.** `scripts/release.mjs` vendors `packages/core` into every plugin and a test asserts it for every directory under `plugins/`. `reflect` does not import that `lib/`, and still carries it.
+- **`reflect` is a standalone plugin.** It imports nothing from `packages/core` and has no `lib/`. `scripts/release.mjs` skips it (Task 1) and a test refuses any import from `lib/` under it.
+- **Never bypass the pre-commit hook.** It runs gitleaks. If it blocks a commit, stop and report the finding; do not use `--no-verify`.
+- **Match the repo's style:** no semicolons, single quotes, parentheses around every arrow parameter (`(name) => …`).
 - **Commits carry NO `Co-Authored-By` trailer and no "Generated with Claude Code" line.** Commit with the repo's configured identity; never pass `-c user.name`.
 - All commands run from the repo root, `~/Projects/TacosPlugins`, on branch `feat/reflect`.
 
@@ -29,8 +31,7 @@
 
 ```
 plugins/reflect/
-  .claude-plugin/plugin.json     Task 1   manifest (no hooks yet; the mod adds them)
-  lib/                           Task 1   vendored core, untouched by hand
+  .claude-plugin/plugin.json     Task 1   manifest (no hooks yet; the mod adds them); no lib/
   indexer/clock.mjs              Task 2   instant -> local day and hour; day arithmetic
   indexer/agg.mjs                Task 2   aggregate shapes; how one file adds into a day
   indexer/scan.mjs               Task 2   lines of one transcript -> FileSummary (pure)
@@ -63,26 +64,31 @@ SessionRow  = { id, project, title, entrypoint, start, end, activeMs, prompts, o
 
 ---
 
-### Task 1: Scaffold the plugin and scope `npm test`
+### Task 1: Scaffold the plugin, scope `npm test`, and exempt it from vendoring
 
-`npm test` is a bare `node --test`. On Node 22 that also runs `*.test.ts`, and the mod's engine tests (a later plan) import `claude-code/testing`, which Node cannot resolve. The script is scoped to `.mjs` now, before any `.ts` test exists.
+Two pieces of shared tooling change before any `reflect` code exists.
+
+- **`npm test` is a bare `node --test`.** On Node 22 that also runs `*.test.ts`, and the mod's engine tests (a later plan) import `claude-code/testing`, which Node cannot resolve. The script is scoped to `.mjs` now, before any `.ts` test exists.
+- **`scripts/release.mjs` vendors `packages/core` into every plugin.** `reflect` imports nothing from it. A copy would be dead code in the published plugin, and it would duplicate the OAuth client id line of `auth.mjs` into a plugin that does no auth: the owner's pre-commit gitleaks hook refused exactly that commit when this task was first attempted. `reflect` therefore becomes a *standalone* plugin that the release script skips, and a test refuses any import from `lib/` under it.
 
 **Files:**
 - Create: `plugins/reflect/.claude-plugin/plugin.json`
 - Create: `plugins/reflect/test/scaffold.test.mjs`
-- Create: `plugins/reflect/lib/*.mjs` (by running `scripts/release.mjs`, never by hand)
 - Modify: `package.json` (the `test` script)
+- Modify: `scripts/release.mjs`
+- Modify: `packages/core/test/release.test.mjs`
+- Modify: `README.md` (two places that say "every plugin")
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: the directory `plugins/reflect/`; `npm test` running exactly the `*.test.mjs` files.
+- Produces: the directory `plugins/reflect/`, with no `lib/`; `npm test` running exactly the `*.test.mjs` files; from `scripts/release.mjs`, `STANDALONE_PLUGINS: string[]` and `vendoredPlugins(pluginsDir): string[]`.
 
 - [ ] **Step 1: Record the baseline**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
 Expected: `# tests 262`, `# pass 262`, `# fail 0`.
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Write the failing tests**
 
 **Create `plugins/reflect/test/scaffold.test.mjs`:**
 
@@ -94,7 +100,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-const json = path => JSON.parse(readFileSync(join(ROOT, path), 'utf8'))
+const json = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'))
 
 // A bare `node --test` also runs *.test.ts on Node 22, and a mod's engine tests
 // import 'claude-code/testing', which only `claude plugin test` can resolve.
@@ -110,10 +116,64 @@ test('the reflect manifest names the plugin, with a version, and not like one of
 })
 ```
 
-- [ ] **Step 3: Run it to verify it fails**
+In `packages/core/test/release.test.mjs`, make three edits.
 
-Run: `node --test plugins/reflect/test/scaffold.test.mjs`
-Expected: both tests FAIL, the first on the script string, the second with `ENOENT` for `plugin.json`.
+Change the import of the release script to:
+
+```js
+import { STANDALONE_PLUGINS, vendorCore, vendoredPlugins } from '../../../scripts/release.mjs'
+```
+
+In the test `every packages/core module is vendored byte-identically into every plugin/*/lib/`, replace the two lines that compute `plugins` from `readdirSync(pluginsDir)` with one, and reword the comment above the test to say it loops over `vendoredPlugins()`:
+
+```js
+  const plugins = vendoredPlugins(pluginsDir)
+```
+
+Append to the end of the file:
+
+```js
+/** Every source file under dir, at any depth. */
+function sourceFiles(dir) {
+  const found = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...sourceFiles(path))
+    else if (/\.(mjs|js|ts|tsx)$/.test(entry.name)) found.push(path)
+  }
+  return found
+}
+
+// A plugin that imports nothing from packages/core carries no copy of it. The copy would
+// be dead code in the published plugin, and it would duplicate auth.mjs's OAuth client id
+// into a plugin that does no auth, which the pre-commit secret scan refuses.
+//
+// The second half is what keeps the exemption honest: a standalone plugin that later
+// starts importing from lib/ would publish exactly the unrunnable plugin described above.
+test('a standalone plugin is skipped by vendoring, has no lib/, and imports nothing from one', () => {
+  const pluginsDir = join(ROOT, 'plugins')
+
+  for (const plugin of STANDALONE_PLUGINS) {
+    const dir = join(pluginsDir, plugin)
+    assert.ok(existsSync(dir), `plugins/${plugin} is listed as standalone but does not exist`)
+    assert.ok(!vendoredPlugins(pluginsDir).includes(plugin), `plugins/${plugin} is standalone and must not be vendored into`)
+    assert.ok(!existsSync(join(dir, 'lib')), `plugins/${plugin}/lib exists — a standalone plugin must not carry packages/core`)
+
+    for (const file of sourceFiles(dir)) {
+      assert.doesNotMatch(
+        readFileSync(file, 'utf8'),
+        /(?:from|import)\s*\(?\s*['"](?:\.\.?\/)+lib\//,
+        `${file} imports from lib/, which a standalone plugin does not have`,
+      )
+    }
+  }
+})
+```
+
+- [ ] **Step 3: Run them to verify they fail**
+
+Run: `node --test plugins/reflect/test/scaffold.test.mjs packages/core/test/release.test.mjs`
+Expected: both scaffold tests FAIL (the script string; `ENOENT` for `plugin.json`), and `release.test.mjs` fails to load with `does not provide an export named 'STANDALONE_PLUGINS'`.
 
 - [ ] **Step 4: Create the manifest**
 
@@ -139,26 +199,62 @@ In `package.json`, change the `test` script from `"node --test"` to:
     "test": "node --test \"**/*.test.mjs\""
 ```
 
-- [ ] **Step 6: Vendor `lib/`**
+- [ ] **Step 6: Teach the release script about standalone plugins**
 
-Run: `node scripts/release.mjs`
-Expected: three lines, one of them `vendored 11 modules into plugins/reflect/lib/`.
+In `scripts/release.mjs`, add above `vendorCore`:
 
-- [ ] **Step 7: Run everything**
+```js
+/** Plugins that import nothing from packages/core, and so carry no vendored lib/. */
+export const STANDALONE_PLUGINS = ['reflect']
+
+/** The plugins under pluginsDir that packages/core is vendored into. */
+export function vendoredPlugins(pluginsDir) {
+  return readdirSync(pluginsDir)
+    .filter((name) => statSync(join(pluginsDir, name)).isDirectory())
+    .filter((name) => !STANDALONE_PLUGINS.includes(name))
+}
+```
+
+and in the `isMain` block replace `readdirSync(join(root, 'plugins'))` with `vendoredPlugins(join(root, 'plugins'))`.
+
+- [ ] **Step 7: Say so in the README**
+
+In `README.md`, change the tree comment on `scripts/release.mjs` to `# copies packages/core into each plugin that uses it`, and in "The vendoring rule" replace "copies it into every plugin's `lib/` directory before release." with:
+
+```
+copies it into the `lib/`
+directory of every plugin that uses it before release. A plugin that imports
+nothing from `packages/core/` is named in `STANDALONE_PLUGINS` there and
+carries no `lib/`.
+```
+
+- [ ] **Step 8: Run the release script and everything else**
+
+Run: `node scripts/release.mjs && ls -a plugins/reflect`
+Expected: two lines, `vendored 11 modules into plugins/model-advisor/lib/` and `…usage-guard/lib/`, none for `reflect`; the listing shows `.claude-plugin` and `test`, and no `lib`.
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 264`, `# pass 264`, `# fail 0` (the 262 from before plus these two).
+Expected: `# tests 265`, `# pass 265`, `# fail 0` (the 262 from before, the two scaffold tests and the standalone one).
 
-- [ ] **Step 8: Mutation-check**
+- [ ] **Step 9: Mutation-check**
 
-Change the script back to `"node --test"`, run `node --test plugins/reflect/test/scaffold.test.mjs`, confirm the first test fails, restore. Change the manifest name to `"claude-reflect"`, confirm the second fails, restore.
+| Mutation | Test that must fail |
+|---|---|
+| `package.json`: change the script back to `"node --test"` | "npm test runs only the .mjs tests" |
+| `plugin.json`: change the name to `"claude-reflect"` | "the reflect manifest names the plugin" |
+| `release.mjs`: set `STANDALONE_PLUGINS = []` | "every packages/core module is vendored byte-identically" (there is no `plugins/reflect/lib`) |
+| `release.mjs`: delete the second `.filter(...)` of `vendoredPlugins` | "a standalone plugin is skipped by vendoring" |
+| Create an empty `plugins/reflect/lib/` directory | the same test |
+| Add the line `import '../lib/auth.mjs'` to `plugins/reflect/test/scaffold.test.mjs` | the same test |
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add package.json plugins/reflect
-git commit -m "feat(reflect): scaffold the plugin and scope npm test to .mjs"
+git add package.json README.md scripts/release.mjs packages/core/test/release.test.mjs plugins/reflect
+git commit -m "feat(reflect): scaffold a standalone plugin and scope npm test to .mjs"
 ```
+
+If the pre-commit hook blocks the commit, stop and report what it found. Do not use `--no-verify`.
 
 ---
 
@@ -196,7 +292,7 @@ import assert from 'node:assert/strict'
 
 import { addDays, createClock, weekdayOf } from '../indexer/clock.mjs'
 
-const ms = iso => Date.parse(iso)
+const ms = (iso) => Date.parse(iso)
 
 test('a clock gives the local day and hour of an instant in its zone', () => {
   const utc = createClock('UTC')
@@ -273,7 +369,7 @@ export function createClock(timeZone) {
   })
   const cache = new Map()
 
-  return ms => {
+  return (ms) => {
     const key = Math.floor(ms / QUARTER_HOUR)
     let answer = cache.get(key)
     if (answer === undefined) {
@@ -326,7 +422,7 @@ export function tempDir(t) {
   return dir
 }
 
-export const text = value => ({ type: 'text', text: value })
+export const text = (value) => ({ type: 'text', text: value })
 export const toolUse = (id, name, input = {}) => ({ type: 'tool_use', id, name, input })
 
 /** One line of an assistant reply. A real reply is one such line per content block, all sharing `id` and usage. */
@@ -409,7 +505,7 @@ const S = 'session-1'
 const main = (fileId = S, clock = utc) => ({ kind: 'main', fileId, home: HOME, clock })
 const sub = () => ({ kind: 'sub', fileId: 'agent-a1', home: HOME, clock: utc })
 const DAY = '2026-03-01'
-const at = time => `${DAY}T${time}.000Z`
+const at = (time) => `${DAY}T${time}.000Z`
 
 test('a reply written as three lines counts its usage once', () => {
   const usage = { id: 'm1', session: S, at: at('10:00:00'), out: 100, inp: 3, cacheR: 50, cacheW: 7 }
@@ -657,7 +753,7 @@ const COUNT_MAPS = ['tools', 'skills', 'mcp', 'efforts']
 const MODEL_FIELDS = ['msgs', 'out', 'inp', 'cacheR', 'cacheW']
 
 // Assigning to `__proto__` on a plain object sets its prototype instead of a key.
-const safeKey = key => (key === '__proto__' ? '(__proto__)' : String(key))
+const safeKey = (key) => (key === '__proto__' ? '(__proto__)' : String(key))
 
 /** The value under `key`, created with `make()` when the map has no such key of its own. */
 export function own(map, key, make) {
@@ -741,7 +837,7 @@ import { bump, emptyDay, emptyModel, own } from './agg.mjs'
 const ACTIVE_GAP_MS = 5 * 60 * 1000
 const NESTED_MARKERS = ['/.claude/worktrees/', '/.superpowers/']
 
-const count = value => (Number.isFinite(value) ? value : 0)
+const count = (value) => (Number.isFinite(value) ? value : 0)
 
 /** A project's name from a working directory: relative to home, a worktree counted as its parent. */
 export function projectOf(cwd, home) {
@@ -914,7 +1010,7 @@ Do each one, run `HOME=$(mktemp -d) node --test plugins/reflect/test/scan.test.m
 - [ ] **Step 11: Run everything and commit**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 284`, `# pass 284`, `# fail 0`.
+Expected: `# tests 285`, `# pass 285`, `# fail 0`.
 
 ```bash
 git add plugins/reflect/indexer/clock.mjs plugins/reflect/indexer/agg.mjs plugins/reflect/indexer/scan.mjs plugins/reflect/test/helpers.mjs plugins/reflect/test/clock.test.mjs plugins/reflect/test/scan.test.mjs
@@ -1077,7 +1173,7 @@ test('a main file whose rescan finds no records loses its row', () => {
   assert.deepEqual(store.sessions, [])
 })
 
-test('a saved store reads back the same, is private, and leaves no temp file', t => {
+test('a saved store reads back the same, is private, and leaves no temp file', (t) => {
   const dir = join(tempDir(t), 'nested', 'reflect')
   const store = twoFiles()
 
@@ -1088,7 +1184,7 @@ test('a saved store reads back the same, is private, and leaves no temp file', t
   assert.deepEqual(readdirSync(dir), ['store.json'])
 })
 
-test('a failed save removes its temp file', t => {
+test('a failed save removes its temp file', (t) => {
   const dir = tempDir(t)
   mkdirSync(join(dir, 'store.json')) // a directory where the file belongs makes the rename fail
   writeFileSync(join(dir, 'store.json', 'in-the-way'), '')
@@ -1098,11 +1194,11 @@ test('a failed save removes its temp file', t => {
   assert.deepEqual(readdirSync(dir), ['store.json'])
 })
 
-test('a missing store is an empty one, not a loss', t => {
+test('a missing store is an empty one, not a loss', (t) => {
   assert.deepEqual(readStore(tempDir(t)), { store: emptyStore(), lost: null })
 })
 
-test('an unusable store is reported and left in place until it is moved aside', t => {
+test('an unusable store is reported and left in place until it is moved aside', (t) => {
   const dir = tempDir(t)
   const path = join(dir, 'store.json')
 
@@ -1117,7 +1213,7 @@ test('an unusable store is reported and left in place until it is moved aside', 
   assert.deepEqual(readdirSync(dir), ['store.corrupt-1234.json'])
 })
 
-test('the lock is held by one caller at a time and leaves nothing behind', t => {
+test('the lock is held by one caller at a time and leaves nothing behind', (t) => {
   const dir = tempDir(t)
 
   const release = acquireLock(dir)
@@ -1131,10 +1227,10 @@ test('the lock is held by one caller at a time and leaves nothing behind', t => 
   assert.deepEqual(readdirSync(dir), [])
 })
 
-test('a lock older than two minutes is abandoned and taken over; a younger one is not', t => {
+test('a lock older than two minutes is abandoned and taken over; a younger one is not', (t) => {
   const dir = tempDir(t)
   const path = join(dir, 'store.lock')
-  const minutesAgo = n => new Date(Date.now() - n * 60_000)
+  const minutesAgo = (n) => new Date(Date.now() - n * 60_000)
 
   writeFileSync(path, 'someone else')
   utimesSync(path, minutesAgo(1), minutesAgo(1))
@@ -1174,7 +1270,7 @@ export function emptyStore() {
   return { version: STORE_VERSION, root: null, files: {}, frozen: { days: {} }, sessions: [] }
 }
 
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 function isStore(value) {
   return (
@@ -1266,7 +1362,7 @@ export function upsertFile(store, rel, { size, mtimeMs }, summary) {
   store.files[rel] = { size, mtimeMs, summary }
   if (summary.kind !== 'main') return
 
-  const at = store.sessions.findIndex(row => row.id === summary.sessionId)
+  const at = store.sessions.findIndex((row) => row.id === summary.sessionId)
   if (summary.session === undefined) {
     if (at !== -1) store.sessions.splice(at, 1)
     return
@@ -1323,7 +1419,7 @@ Expected: 11 tests, all PASS.
 - [ ] **Step 6: Run everything and commit**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 295`, `# pass 295`, `# fail 0`.
+Expected: `# tests 296`, `# pass 296`, `# fail 0`.
 
 ```bash
 git add plugins/reflect/indexer/store.mjs plugins/reflect/test/store.test.mjs
@@ -1370,12 +1466,12 @@ const PROJECT = '-home-u-Projects-demo'
 const MAIN = `${PROJECT}/s1.jsonl`
 const SUB = `${PROJECT}/s1/subagents/agent-a1.jsonl`
 const DAY = '2026-03-01'
-const at = time => `${DAY}T${time}.000Z`
+const at = (time) => `${DAY}T${time}.000Z`
 
 function write(root, rel, lines) {
   const path = join(root, rel)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, lines.map(line => `${line}\n`).join(''))
+  writeFileSync(path, lines.map((line) => `${line}\n`).join(''))
 }
 
 /** One main session with a prompt and a reply, and one subagent file under it. */
@@ -1387,7 +1483,7 @@ function seed(root) {
   write(root, SUB, [reply({ id: 'm2', session: 's1', at: at('10:00:10'), out: 7 })])
 }
 
-test('the first run scans every transcript; a second run with nothing changed scans none', async t => {
+test('the first run scans every transcript; a second run with nothing changed scans none', async (t) => {
   const root = tempDir(t)
   seed(root)
   const store = emptyStore()
@@ -1405,7 +1501,7 @@ test('the first run scans every transcript; a second run with nothing changed sc
   assert.equal(JSON.stringify(store), saved)
 })
 
-test('a file that grew is rescanned, and its numbers replace the old ones', async t => {
+test('a file that grew is rescanned, and its numbers replace the old ones', async (t) => {
   const root = tempDir(t)
   seed(root)
   const store = emptyStore()
@@ -1420,11 +1516,11 @@ test('a file that grew is rescanned, and its numbers replace the old ones', asyn
 })
 
 // Both halves are needed: a rewrite can keep the length, and a restore can keep the time.
-test('a change of size alone, or of modification time alone, is a change', async t => {
+test('a change of size alone, or of modification time alone, is a change', async (t) => {
   const root = tempDir(t)
   const path = join(root, MAIN)
-  const stamp = seconds => new Date(seconds * 1000)
-  const lines = out => [
+  const stamp = (seconds) => new Date(seconds * 1000)
+  const lines = (out) => [
     prompt({ session: 's1', at: at('10:00:00') }),
     reply({ id: 'm1', session: 's1', at: at('10:00:05'), out }),
   ]
@@ -1445,7 +1541,7 @@ test('a change of size alone, or of modification time alone, is a change', async
   assert.equal(mergedDays(store)[DAY].out, 46)
 })
 
-test('a deleted transcript is folded once and its numbers stay for good', async t => {
+test('a deleted transcript is folded once and its numbers stay for good', async (t) => {
   const root = tempDir(t)
   seed(root)
   const store = emptyStore()
@@ -1462,7 +1558,7 @@ test('a deleted transcript is folded once and its numbers stay for good', async 
   assert.deepEqual(store.sessions, rows)
 })
 
-test('updating in two steps gives the same history as one full scan', async t => {
+test('updating in two steps gives the same history as one full scan', async (t) => {
   const root = tempDir(t)
   const stepwise = emptyStore()
   seed(root)
@@ -1480,7 +1576,7 @@ test('updating in two steps gives the same history as one full scan', async t =>
   assert.deepEqual(stepwise.sessions, full.sessions)
 })
 
-test('a store built from one folder refuses another, and folds nothing', async t => {
+test('a store built from one folder refuses another, and folds nothing', async (t) => {
   const first = tempDir(t)
   const other = tempDir(t)
   seed(first)
@@ -1493,7 +1589,7 @@ test('a store built from one folder refuses another, and folds nothing', async t
   assert.equal(JSON.stringify(store), saved)
 })
 
-test('a missing transcripts folder is an empty history for a new store, and an error for one that knows files', async t => {
+test('a missing transcripts folder is an empty history for a new store, and an error for one that knows files', async (t) => {
   const root = join(tempDir(t), 'projects')
   const fresh = emptyStore()
   assert.deepEqual(await updateStore(fresh, root, OPTIONS), { scanned: 0, kept: 0, folded: 0, vanished: 0 })
@@ -1509,7 +1605,7 @@ test('a missing transcripts folder is an empty history for a new store, and an e
   assert.equal(JSON.stringify(store), saved)
 })
 
-test('a file that vanishes while being read is gone: an earlier record of it is folded', async t => {
+test('a file that vanishes while being read is gone: an earlier record of it is folded', async (t) => {
   const root = tempDir(t)
   seed(root)
   const store = emptyStore()
@@ -1524,7 +1620,7 @@ test('a file that vanishes while being read is gone: an earlier record of it is 
   assert.deepEqual(mergedDays(store), before)
 })
 
-test('any other failure while reading a file stops the update', async t => {
+test('any other failure while reading a file stops the update', async (t) => {
   const root = tempDir(t)
   seed(root)
 
@@ -1534,13 +1630,13 @@ test('any other failure while reading a file stops the update', async t => {
   )
 })
 
-test('listTranscripts finds .jsonl files at any depth, by forward-slash path, sorted, and nothing else', t => {
+test('listTranscripts finds .jsonl files at any depth, by forward-slash path, sorted, and nothing else', (t) => {
   const root = tempDir(t)
   seed(root)
   write(root, `${PROJECT}/memory/MEMORY.md`, ['notes'])
   write(root, `${PROJECT}/s1/tool-results/out.json`, ['{}'])
 
-  assert.deepEqual(listTranscripts(root).map(file => file.rel), [MAIN, SUB])
+  assert.deepEqual(listTranscripts(root).map((file) => file.rel), [MAIN, SUB])
   assert.equal(listTranscripts(join(root, 'nowhere')), null)
 })
 ```
@@ -1679,7 +1775,7 @@ Expected: 10 tests, all PASS.
 - [ ] **Step 6: Run everything and commit**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 305`, `# pass 305`, `# fail 0`.
+Expected: `# tests 306`, `# pass 306`, `# fail 0`.
 
 ```bash
 git add plugins/reflect/indexer/update.mjs plugins/reflect/test/update.test.mjs
@@ -1720,8 +1816,8 @@ import { readHistory } from '../indexer/history.mjs'
 import { readWork, WORK_SQL } from '../indexer/mem.mjs'
 import { tempDir, utc } from './helpers.mjs'
 
-const ms = iso => Date.parse(iso)
-const quarter = iso => Math.floor(ms(iso) / 900_000)
+const ms = (iso) => Date.parse(iso)
+const quarter = (iso) => Math.floor(ms(iso) / 900_000)
 const hoursAt = (hour, n) => {
   const hours = new Array(24).fill(0)
   hours[hour] = n
@@ -1751,7 +1847,7 @@ test('an empty history file is no days', () => {
 
 test('work rows are bucketed by local day and merged across the quarter hours of a day', () => {
   const calls = []
-  const run = argv => {
+  const run = (argv) => {
     calls.push(argv)
     return JSON.stringify([
       { q: quarter('2026-03-01T09:00:00Z'), project: 'demo', type: 'feature', n: 2 },
@@ -1787,7 +1883,7 @@ test('a database with no observations is an empty work mix, not a missing one', 
 const hasSqlite = spawnSync('sqlite3', ['-version']).status === 0
 
 // The only test that runs the real tool: it is what proves WORK_SQL and the -json flag.
-test('the real sqlite3 tool answers the query as the code expects', { skip: !hasSqlite && 'sqlite3 is not installed' }, t => {
+test('the real sqlite3 tool answers the query as the code expects', { skip: !hasSqlite && 'sqlite3 is not installed' }, (t) => {
   const db = join(tempDir(t), 'mem.db')
   const at = ms('2026-03-01T09:00:00Z')
   execFileSync('sqlite3', [
@@ -1909,7 +2005,7 @@ Expected: 6 tests, all PASS (5 and 1 skipped where `sqlite3` is not installed).
 - [ ] **Step 6: Run everything and commit**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 311`, `# pass 311`, `# fail 0`.
+Expected: `# tests 312`, `# pass 312`, `# fail 0`.
 
 ```bash
 git add plugins/reflect/indexer/history.mjs plugins/reflect/indexer/mem.mjs plugins/reflect/test/sources.test.mjs
@@ -1970,16 +2066,16 @@ import { buildView } from '../indexer/query.mjs'
 import { utc } from './helpers.mjs'
 
 const TODAY = '2026-03-10' // a Tuesday
-const ms = iso => Date.parse(iso)
+const ms = (iso) => Date.parse(iso)
 const hoursAt = (hour, n) => {
   const hours = new Array(24).fill(0)
   hours[hour] = n
   return hours
 }
-const day = fields => ({ ...emptyMergedDay(), ...fields })
-const usage = out => ({ msgs: 1, out, inp: 0, cacheR: 0, cacheW: 0 })
+const day = (fields) => ({ ...emptyMergedDay(), ...fields })
+const usage = (out) => ({ msgs: 1, out, inp: 0, cacheR: 0, cacheW: 0 })
 const typed = (n, hour = 12) => ({ prompts: n, hours: hoursAt(hour, n) })
-const activeOn = list => Object.fromEntries(list.map(each => [each, typed(1)]))
+const activeOn = (list) => Object.fromEntries(list.map((each) => [each, typed(1)]))
 const session = (id, start, fields = {}) => ({
   id,
   project: 'demo',
@@ -1992,7 +2088,7 @@ const session = (id, start, fields = {}) => ({
   out: 0,
   ...fields,
 })
-const view = over =>
+const view = (over) =>
   buildView({
     days: {},
     sessions: [],
@@ -2017,7 +2113,7 @@ test('a range of seven days is today and the six days before it, and nothing aft
   assert.deepEqual(v.range, { id: '7d', from: '2026-03-04', to: TODAY, days: 7 })
   assert.equal(v.totals.prompts, 1)
   assert.deepEqual(
-    v.days.map(each => each.day),
+    v.days.map((each) => each.day),
     ['2026-03-04', '2026-03-05', '2026-03-06', '2026-03-07', '2026-03-08', '2026-03-09', '2026-03-10'],
   )
   assert.deepEqual(v.days[0], { day: '2026-03-04', prompts: 1, out: 0, sessions: 0, models: {} })
@@ -2077,8 +2173,8 @@ test('sessions belong to the range their start falls in, and a project counts th
   assert.equal(v.totals.sessions, 2)
   assert.equal(v.totals.desktopSessions, 1)
   assert.equal(v.totals.cliSessions, 1)
-  assert.deepEqual(v.sessions.longest.map(each => each.title), ['B', 'A'])
-  assert.deepEqual(v.sessions.mostPrompts.map(each => each.title), ['A', 'B'])
+  assert.deepEqual(v.sessions.longest.map((each) => each.title), ['B', 'A'])
+  assert.deepEqual(v.sessions.mostPrompts.map((each) => each.title), ['A', 'B'])
   assert.deepEqual(v.sessions.longest[0], {
     title: 'B',
     project: 'demo',
@@ -2139,7 +2235,7 @@ test('models are ranked by output; a day names the top six and folds the rest in
   const models = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`m${i + 1}`, usage(8 - i)]))
   const v = view({ days: { [TODAY]: day({ models, out: 36 }) } })
 
-  assert.deepEqual(v.models.map(each => each.name), ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8'])
+  assert.deepEqual(v.models.map((each) => each.name), ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8'])
   assert.deepEqual(v.models[0], { name: 'm1', msgs: 1, out: 8, inp: 0, cacheR: 0, cacheW: 0 })
   assert.deepEqual(v.days.at(-1).models, { m1: 8, m2: 7, m3: 6, m4: 5, m5: 4, m6: 3, other: 3 })
 })
@@ -2242,7 +2338,7 @@ const NO_PROMPTS = { prompts: 0, hours: new Array(24).fill(0) }
 
 const get = (map, key) => (Object.hasOwn(map, key) ? map[key] : null)
 const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-const earliest = keys => (keys.length > 0 ? [...keys].sort()[0] : null)
+const earliest = (keys) => (keys.length > 0 ? [...keys].sort()[0] : null)
 
 function ranked(map, limit = Infinity) {
   return Object.entries(map)
@@ -2290,7 +2386,7 @@ function workMix(rows, from, to) {
     types: ranked(types),
     byMonth: Object.keys(months)
       .sort()
-      .map(month => ({ month, types: months[month] })),
+      .map((month) => ({ month, types: months[month] })),
     byProject: Object.entries(projects)
       .map(([name, project]) => ({ name, n: project.n, types: project.types }))
       .sort((a, b) => b.n - a.n || byName(a, b))
@@ -2303,14 +2399,14 @@ export function buildView({ days, sessions, history, work, rangeId, today, clock
   const length = RANGES[rangeId]
 
   // Each source can only under-count a day, so the larger one is that day's prompts.
-  const promptsOn = day => {
+  const promptsOn = (day) => {
     const transcripts = get(days, day)
     const typed = get(history, day)
     if (typed !== null && (transcripts === null || typed.prompts > transcripts.prompts)) return typed
     return transcripts ?? NO_PROMPTS
   }
 
-  const workDays = work === null ? [] : work.map(row => row.day)
+  const workDays = work === null ? [] : work.map((row) => row.day)
   const known = [...new Set([...Object.keys(days), ...Object.keys(history), ...workDays])].sort()
   const firstKnown = known.length > 0 && known[0] < today ? known[0] : today
   const from = length === null ? firstKnown : addDays(today, -(length - 1))
@@ -2351,7 +2447,7 @@ export function buildView({ days, sessions, history, work, rangeId, today, clock
       series.push(point)
     }
 
-    const started = sessions.filter(row => {
+    const started = sessions.filter((row) => {
       const day = clock(row.start).day
       return day >= first && day <= last
     })
@@ -2362,17 +2458,17 @@ export function buildView({ days, sessions, history, work, rangeId, today, clock
   const { totals, maps, started } = current
 
   totals.sessions = started.length
-  totals.desktopSessions = started.filter(row => row.entrypoint === 'claude-desktop').length
-  totals.cliSessions = started.filter(row => row.entrypoint === 'cli').length
+  totals.desktopSessions = started.filter((row) => row.entrypoint === 'claude-desktop').length
+  totals.cliSessions = started.filter((row) => row.entrypoint === 'cli').length
   totals.toolCalls = Object.values(maps.tools).reduce((sum, n) => sum + n, 0)
   const input = totals.cacheR + totals.cacheW + totals.inp
   totals.cacheHitRate = input === 0 ? null : totals.cacheR / input
-  Object.assign(totals, streaks(known.filter(day => promptsOn(day).prompts > 0), today))
+  Object.assign(totals, streaks(known.filter((day) => promptsOn(day).prompts > 0), today))
 
   const models = Object.entries(maps.models)
     .map(([name, usage]) => ({ name, ...usage }))
     .sort((a, b) => b.out - a.out || byName(a, b))
-  const named = new Set(models.slice(0, LIMITS.dayModels).map(model => model.name))
+  const named = new Set(models.slice(0, LIMITS.dayModels).map((model) => model.name))
   for (const point of current.series) {
     const folded = {}
     for (const [model, out] of Object.entries(point.models)) bump(folded, named.has(model) ? model : 'other', out)
@@ -2386,14 +2482,14 @@ export function buildView({ days, sessions, history, work, rangeId, today, clock
     .sort((a, b) => b.out - a.out || b.prompts - a.prompts || byName(a, b))
   totals.projects = projects.length
 
-  const brief = row => ({
+  const brief = (row) => ({
     title: row.title,
     project: row.project,
     start: row.start,
     activeMs: row.activeMs,
     prompts: row.prompts,
   })
-  const top = field =>
+  const top = (field) =>
     [...started]
       .sort((a, b) => b[field] - a[field] || a.start - b.start)
       .slice(0, LIMITS.sessions)
@@ -2465,7 +2561,7 @@ Expected: 12 tests, all PASS.
 - [ ] **Step 6: Run everything and commit**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 323`, `# pass 323`, `# fail 0`.
+Expected: `# tests 324`, `# pass 324`, `# fail 0`.
 
 ```bash
 git add plugins/reflect/indexer/query.mjs plugins/reflect/test/query.test.mjs
@@ -2531,7 +2627,7 @@ function configDir(t) {
       prompt({ session: 's1', at: '2026-03-09T10:00:00.000Z' }),
       reply({ id: 'm1', session: 's1', at: '2026-03-09T10:00:05.000Z', out: 40, blocks: [toolUse('t1', 'Bash')] }),
     ]
-      .map(line => `${line}\n`)
+      .map((line) => `${line}\n`)
       .join(''),
   )
   writeFileSync(
@@ -2543,8 +2639,8 @@ function configDir(t) {
 
 const args = (...more) => ['view', '--range', '7d', '--now', NOW, '--tz', 'UTC', '--home', HOME, ...more]
 // Both folders the command would otherwise look for on the real machine.
-const env = config => ({ CLAUDE_CONFIG_DIR: config, CLAUDE_MEM_DATA_DIR: join(config, 'claude-mem') })
-const dataDir = config => join(config, 'tacos', 'reflect')
+const env = (config) => ({ CLAUDE_CONFIG_DIR: config, CLAUDE_MEM_DATA_DIR: join(config, 'claude-mem') })
+const dataDir = (config) => join(config, 'tacos', 'reflect')
 const hasSqlite = spawnSync('sqlite3', ['-version']).status === 0
 
 async function viewOf(config, ...more) {
@@ -2554,7 +2650,7 @@ async function viewOf(config, ...more) {
   return JSON.parse(result.stdout)
 }
 
-test('view reads the transcripts and the prompt history of its config folder and prints a View', async t => {
+test('view reads the transcripts and the prompt history of its config folder and prints a View', async (t) => {
   const config = configDir(t)
 
   const view = await viewOf(config)
@@ -2571,7 +2667,7 @@ test('view reads the transcripts and the prompt history of its config folder and
   assert.deepEqual(readdirSync(dataDir(config)), ['store.json']) // saved, and the lock released
 })
 
-test('history outlives its transcript, because the store was saved', async t => {
+test('history outlives its transcript, because the store was saved', async (t) => {
   const config = configDir(t)
   await viewOf(config)
   rmSync(join(config, TRANSCRIPT))
@@ -2582,7 +2678,7 @@ test('history outlives its transcript, because the store was saved', async t => 
   assert.equal(view.totals.sessions, 1)
 })
 
-test('while another process holds the lock, view answers from the store as it stands and says so', async t => {
+test('while another process holds the lock, view answers from the store as it stands and says so', async (t) => {
   const config = configDir(t)
   mkdirSync(dataDir(config), { recursive: true })
   writeFileSync(join(dataDir(config), 'store.lock'), 'someone else')
@@ -2595,7 +2691,7 @@ test('while another process holds the lock, view answers from the store as it st
   assert.deepEqual(readdirSync(dataDir(config)), ['store.lock']) // nothing saved, the other lock left alone
 })
 
-test('an unreadable store is moved aside and rebuilt, and the loss is said', async t => {
+test('an unreadable store is moved aside and rebuilt, and the loss is said', async (t) => {
   const config = configDir(t)
   mkdirSync(dataDir(config), { recursive: true })
   writeFileSync(join(dataDir(config), 'store.json'), 'not json')
@@ -2611,7 +2707,7 @@ test('an unreadable store is moved aside and rebuilt, and the loss is said', asy
   assert.equal(readFileSync(join(dataDir(config), files[0]), 'utf8'), 'not json')
 })
 
-test('the work mix is read from the claude-mem folder named in the environment', { skip: !hasSqlite && 'sqlite3 is not installed' }, async t => {
+test('the work mix is read from the claude-mem folder named in the environment', { skip: !hasSqlite && 'sqlite3 is not installed' }, async (t) => {
   const config = configDir(t)
   mkdirSync(join(config, 'claude-mem'))
   execFileSync('sqlite3', [
@@ -2625,7 +2721,7 @@ test('the work mix is read from the claude-mem folder named in the environment',
   assert.deepEqual(view.work.types, [{ name: 'feature', n: 1 }])
 })
 
-test('transcript lines that cannot be read are counted in a note', async t => {
+test('transcript lines that cannot be read are counted in a note', async (t) => {
   const config = configDir(t)
   appendFileSync(join(config, TRANSCRIPT), '{"type":"assistant", broken\n')
 
@@ -2635,7 +2731,7 @@ test('transcript lines that cannot be read are counted in a note', async t => {
   assert.deepEqual((await viewOf(config)).notes, ['2 transcript lines could not be read and were skipped.'])
 })
 
-test('a bad command line exits 2 with the usage and prints no View', async t => {
+test('a bad command line exits 2 with the usage and prints no View', async (t) => {
   // Isolated although none of these should get as far as a folder: if the parser
   // is ever broken, the command must land in this empty folder, not on the real machine.
   const isolated = env(tempDir(t))
@@ -2648,7 +2744,7 @@ test('a bad command line exits 2 with the usage and prints no View', async t => 
   }
 })
 
-test('a failure exits 1 with the reason, prints no View, and releases the lock', async t => {
+test('a failure exits 1 with the reason, prints no View, and releases the lock', async (t) => {
   const config = configDir(t)
 
   const badTime = await run(args('--now', 'whenever'), env(config))
@@ -2666,7 +2762,7 @@ test('a failure exits 1 with the reason, prints no View, and releases the lock',
 
 // A plugin folder is often reached through a symlink. The program must still
 // recognise that it is the one being run.
-test('run as a program through a symlinked folder, it prints a View', t => {
+test('run as a program through a symlinked folder, it prints a View', (t) => {
   const config = configDir(t)
   const link = join(tempDir(t), 'linked')
   symlinkSync(INDEXER, link)
@@ -2679,7 +2775,7 @@ test('run as a program through a symlinked folder, it prints a View', t => {
   assert.equal(JSON.parse(stdout).totals.out, 40)
 })
 
-test('run as a program with a bad command line, it exits 2 and prints the usage on stderr', t => {
+test('run as a program with a bad command line, it exits 2 and prints the usage on stderr', (t) => {
   const result = spawnSync(process.execPath, [join(INDEXER, 'cli.mjs'), 'view', '--range', '1y'], {
     encoding: 'utf8',
     env: { ...process.env, ...env(tempDir(t)) },
@@ -2847,10 +2943,10 @@ Expected: 10 tests, all PASS (9 and 1 skipped where `sqlite3` is not installed).
 - [ ] **Step 6: Run everything**
 
 Run: `npm test 2>&1 | grep -E '^# (tests|pass|fail)'`
-Expected: `# tests 333`, `# pass 333`, `# fail 0`.
+Expected: `# tests 334`, `# pass 334`, `# fail 0`.
 
-Run: `node scripts/release.mjs && git status --short plugins/*/lib`
-Expected: three `vendored 11 modules` lines and no changes listed.
+Run: `node scripts/release.mjs && git status --short plugins && ls -a plugins/reflect`
+Expected: two `vendored 11 modules` lines, no changes listed, and no `lib` in the listing.
 
 - [ ] **Step 7: Check it against the real history**
 
@@ -2865,7 +2961,7 @@ const t = v.totals
 console.log({ from: v.range.from, days: v.range.days, coverage: v.coverage, notes: v.notes })
 console.log({ prompts: t.prompts, sessions: t.sessions, replies: t.msgs + t.subMsgs, outM: +(t.out / 1e6).toFixed(1),
   cacheHit: t.cacheHitRate, streak: [t.currentStreak, t.bestStreak], projects: t.projects })
-console.log(v.models.slice(0, 3).map(m => m.name), v.tools.slice(0, 3))
+console.log(v.models.slice(0, 3).map((m) => m.name), v.tools.slice(0, 3))
 ' "$DATA/view.json"
 time node plugins/reflect/indexer/cli.mjs view --range 30d --data "$DATA" > /dev/null
 ls -la "$DATA"; rm -rf "$DATA"; ls ~/.claude/tacos/reflect 2>&1
