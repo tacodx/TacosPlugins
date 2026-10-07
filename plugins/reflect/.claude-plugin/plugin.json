@@ -1,0 +1,9 @@
+{
+  "name": "reflect",
+  "version": "0.1.0",
+  "description": "A dashboard of how you use Claude Code, drawn from your local history.",
+  "author": {
+    "name": "tacodx"
+  },
+  "license": "MIT"
+}

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdi
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { vendorCore } from '../../../scripts/release.mjs'
+import { STANDALONE_PLUGINS, vendorCore, vendoredPlugins } from '../../../scripts/release.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -64,16 +64,15 @@ test('vendorCore prunes a stale module removed from core, but leaves non-.mjs fi
 // the working tree exactly as `git archive` would ship it, so this fails the moment
 // someone edits packages/core and forgets to re-run scripts/release.mjs before committing.
 //
-// Loops over every directory under plugins/ (exactly the set scripts/release.mjs's own
-// isMain block vendors into) rather than naming usage-guard alone, so this keeps covering
-// every plugin — model-advisor now, and whatever ships next — with no further edit here.
+// Loops over vendoredPlugins() (exactly the set scripts/release.mjs's own isMain block
+// vendors into) rather than naming usage-guard alone, so this keeps covering every plugin
+// that uses core — model-advisor now, and whatever ships next — with no further edit here.
 test('every packages/core module is vendored byte-identically into every plugin/*/lib/', () => {
   const core = join(ROOT, 'packages', 'core')
   const pluginsDir = join(ROOT, 'plugins')
   const coreModules = readdirSync(core)
     .filter((name) => name.endsWith('.mjs') && !statSync(join(core, name)).isDirectory())
-  const plugins = readdirSync(pluginsDir)
-    .filter((name) => statSync(join(pluginsDir, name)).isDirectory())
+  const plugins = vendoredPlugins(pluginsDir)
 
   assert.ok(coreModules.length > 0, 'sanity check: packages/core must actually contain modules')
   assert.ok(plugins.length >= 2, 'sanity check: this must cover more than one plugin')
@@ -86,6 +85,42 @@ test('every packages/core module is vendored byte-identically into every plugin/
       const source = readFileSync(join(core, name), 'utf8')
       const vendored = readFileSync(vendoredPath, 'utf8')
       assert.equal(vendored, source, `plugins/${plugin}/lib/${name} has drifted from packages/core/${name} — run scripts/release.mjs and commit the result`)
+    }
+  }
+})
+
+/** Every source file under dir, at any depth. */
+function sourceFiles(dir) {
+  const found = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...sourceFiles(path))
+    else if (/\.(mjs|js|ts|tsx)$/.test(entry.name)) found.push(path)
+  }
+  return found
+}
+
+// A plugin that imports nothing from packages/core carries no copy of it. The copy would
+// be dead code in the published plugin, and it would duplicate auth.mjs's OAuth client id
+// into a plugin that does no auth, which the pre-commit secret scan refuses.
+//
+// The second half is what keeps the exemption honest: a standalone plugin that later
+// starts importing from lib/ would publish exactly the unrunnable plugin described above.
+test('a standalone plugin is skipped by vendoring, has no lib/, and imports nothing from one', () => {
+  const pluginsDir = join(ROOT, 'plugins')
+
+  for (const plugin of STANDALONE_PLUGINS) {
+    const dir = join(pluginsDir, plugin)
+    assert.ok(existsSync(dir), `plugins/${plugin} is listed as standalone but does not exist`)
+    assert.ok(!vendoredPlugins(pluginsDir).includes(plugin), `plugins/${plugin} is standalone and must not be vendored into`)
+    assert.ok(!existsSync(join(dir, 'lib')), `plugins/${plugin}/lib exists — a standalone plugin must not carry packages/core`)
+
+    for (const file of sourceFiles(dir)) {
+      assert.doesNotMatch(
+        readFileSync(file, 'utf8'),
+        /(?:from|import)\s*\(?\s*['"](?:\.\.?\/)+lib\//,
+        `${file} imports from lib/, which a standalone plugin does not have`,
+      )
     }
   }
 })
