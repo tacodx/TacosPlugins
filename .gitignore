@@ -2,3 +2,7 @@ node_modules/
 *.log
 .DS_Store
 .superpowers/
+
+# Written beside a mod by Claude Code each time it loads one from this folder.
+plugins/*/.claude-plugin/types/
+plugins/*/tsconfig.json
