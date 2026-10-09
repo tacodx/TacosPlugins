@@ -58,3 +58,39 @@ test('the root readme lists model-advisor in the plugin table', () => {
   const r = read('README.md')
   assert.match(r, /model-advisor/)
 })
+
+test('the reflect readme says what it needs: a Claude Code with mods, and Node', () => {
+  const r = read('plugins/reflect/README.md')
+  assert.match(r, /2\.1\.287/)
+  assert.match(r, /Node 22/)
+})
+
+test('the reflect readme names the one folder it writes to', () => {
+  const r = read('plugins/reflect/README.md')
+  assert.match(r, /~\/\.claude\/tacos\/reflect/)
+  assert.match(r, /read-only|only reads|never (writes|changes)/i)
+})
+
+// The plugin's one promise about privacy. If the Tips request ever changes, this
+// sentence has to change with it: tips.test.mjs is what holds the code to it.
+test('the reflect readme says what leaves the machine, and only when asked', () => {
+  const r = read('plugins/reflect/README.md')
+  assert.match(r, /Tips/)
+  assert.match(r, /placeholders/)
+  assert.match(r, /session titles/i)
+})
+
+test('the reflect readme has a Limitations section', () => {
+  const r = read('plugins/reflect/README.md')
+  assert.match(r, /^## Limitations/m)
+})
+
+test('the reflect readme does not claim to be Anthropic\'s', () => {
+  const r = read('plugins/reflect/README.md')
+  assert.match(r, /not (made|built|affiliated)[^.]*Anthropic/i)
+})
+
+test('the root readme lists reflect in the plugin table', () => {
+  const r = read('README.md')
+  assert.match(r, /\[`reflect`\]\(plugins\/reflect\/README\.md\)/)
+})
