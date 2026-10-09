@@ -1,16 +1,21 @@
 import type { View } from '../../types'
-import { columnChart, hourGrid, rankBars, shareBar } from '../charts.mjs'
-import { change, count, duration, modelName, percent, plural, tokens } from '../format.mjs'
-import { columnsOf, withOther } from '../shape.mjs'
-import { chart, pair, tile } from './parts.tsx'
+import { heroCard, hourCard, rankCard, shareCard, statCard } from '../charts.mjs'
+import { change, count, dayLabel, duration, modelName, percent, plural, tokens } from '../format.mjs'
+import { busiestHour, columnsOf, isComparable, withOther } from '../shape.mjs'
+import { card } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export function overview(el: Desktop, view: View) {
   const { Box } = el
   const t = view.totals
   const replies = t.msgs + t.subMsgs
   const top = view.models[0]
-  const moved = view.previous === null ? null : change(t.prompts, view.previous.prompts)
+  const busiest = busiestHour(view.hours)
+  const before = isComparable(view) ? view.previous : null
+  const moved = before === null ? null : change(t.out, before.out)
+  const promptsMoved = before === null ? null : change(t.prompts, before.prompts)
   // Tokens exist only where transcripts do: no months of empty axis before them.
   const since = view.coverage.transcriptsFrom
   const tokenDays = since === null ? view.days : view.days.filter((each) => each.day >= since)
@@ -18,40 +23,63 @@ export function overview(el: Desktop, view: View) {
 
   return (
     <Box flexDirection="column" gap={1}>
-      {pair(
+      {card(
         el,
-        tile(el, 'prompts', 'Prompts', count(t.prompts), moved === null ? plural(t.activeDays, 'active day') : `${moved} on the ${view.range.days} days before`),
-        tile(el, 'sessions', 'Sessions', count(t.sessions), `${count(t.desktopSessions)} desktop · ${count(t.cliSessions)} terminal`),
+        'hero',
+        heroCard({
+          eyebrow: 'Output tokens',
+          aside: `${dayLabel(tokenDays[0]?.day ?? view.range.from)} – ${dayLabel(view.range.to)}`,
+          figure: tokens(t.out),
+          unit: 'output tokens',
+          note: moved === null ? '' : `${moved} on the ${view.range.days} days before`,
+          columns: perDay,
+          format: tokens,
+        }),
+        `${tokens(t.out)} output tokens from ${view.range.from} to ${view.range.to}${moved === null ? '' : `, ${moved} on the ${view.range.days} days before`}`,
       )}
-      {pair(
+      {card(
         el,
-        tile(el, 'out', 'Output tokens', tokens(t.out), top !== undefined && t.out > 0 ? `${modelName(top.name)} wrote ${percent(top.out / t.out)}` : 'none yet'),
-        tile(el, 'busy', 'Busy time', duration(t.activeMs), 'sessions at work, attended or not'),
+        'stats',
+        statCard([
+          { label: 'Prompts', figure: count(t.prompts), note: promptsMoved === null ? plural(t.activeDays, 'active day') : `${promptsMoved} on the days before` },
+          { label: 'Sessions', figure: count(t.sessions), note: `${count(t.desktopSessions)} desktop · ${count(t.cliSessions)} terminal` },
+          { label: 'Busy time', figure: duration(t.activeMs), note: 'at work, attended or not' },
+          { label: 'Streak', figure: plural(t.currentStreak, 'day'), note: `best ${plural(t.bestStreak, 'day')}` },
+          { label: 'Cache hit rate', figure: t.cacheHitRate === null ? 'n/a' : percent(t.cacheHitRate), note: `${tokens(t.cacheR)} read from cache` },
+          { label: 'Subagent share', figure: replies > 0 ? percent(t.subMsgs / replies) : 'n/a', note: `of ${plural(replies, 'reply', 'replies')}` },
+        ]),
+        `${count(t.prompts)} prompts, ${count(t.sessions)} sessions, ${duration(t.activeMs)} of busy time, a streak of ${plural(t.currentStreak, 'day')}`,
       )}
-      {pair(
+      {card(
         el,
-        tile(el, 'streak', 'Streak', plural(t.currentStreak, 'day'), `best ${plural(t.bestStreak, 'day')}`),
-        tile(el, 'cache', 'Cache hit rate', t.cacheHitRate === null ? 'n/a' : percent(t.cacheHitRate), `${tokens(t.cacheR)} read from cache`),
+        'hours',
+        hourCard({
+          eyebrow: 'When you prompt',
+          aside: busiest === null ? '' : `peak ${WEEKDAYS[busiest.weekday]} ${String(busiest.hour).padStart(2, '0')}:00`,
+          hours: view.hours,
+        }),
+        `Prompts by weekday and hour, ${count(t.prompts)} in all`,
       )}
-      {pair(
-        el,
-        tile(el, 'subagents', 'Subagent share', replies > 0 ? percent(t.subMsgs / replies) : 'n/a', `of ${plural(replies, 'reply', 'replies')}`),
-        tile(el, 'tools', 'Tool calls', count(t.toolCalls), view.tools[0] !== undefined ? `${view.tools[0].name} ${count(view.tools[0].n)}` : 'none yet'),
-      )}
-      {chart(el, 'tokens', 'Output tokens per day', columnChart(perDay, tokens, 'output tokens'), `Output tokens over time, ${tokens(t.out)} in all`)}
-      {chart(el, 'hours', 'When you prompt', hourGrid(view.hours), `Prompts by weekday and hour, ${count(t.prompts)} in all`)}
-      {chart(
+      {card(
         el,
         'projects',
-        'Top projects by output tokens',
-        rankBars(view.projects.slice(0, 5).map((each) => ({ name: each.name, value: each.out })), tokens),
+        rankCard({
+          eyebrow: 'Top projects',
+          aside: 'output tokens',
+          rows: view.projects.slice(0, 5).map((each) => ({ name: each.name, value: each.out })),
+          format: tokens,
+        }),
         `The ${Math.min(5, view.projects.length)} projects with the most output tokens, of ${t.projects}`,
       )}
-      {chart(
+      {card(
         el,
         'models',
-        'Models by output tokens',
-        shareBar(withOther(view.models, 4, (each) => each.out, (each) => modelName(each.name)), tokens),
+        shareCard({
+          eyebrow: 'Models',
+          aside: 'output tokens',
+          parts: withOther(view.models, 4, (each) => each.out, (each) => modelName(each.name)),
+          format: tokens,
+        }),
         `Share of output tokens by model, led by ${top !== undefined ? modelName(top.name) : 'none'}`,
       )}
     </Box>

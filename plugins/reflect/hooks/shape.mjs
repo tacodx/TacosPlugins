@@ -42,6 +42,17 @@ export function columnsOf(days, valuesOf) {
   return columns.map(({ label, title, values }) => ({ label, title, values }))
 }
 
+/**
+ * Whether the window before this one can be compared with it. It can when it
+ * lies wholly inside the time transcripts cover: before that only some prompts
+ * are known, and "up 1,300%" would be a statement about deleted files.
+ */
+export function isComparable(view) {
+  const since = view.coverage.transcriptsFrom
+  if (view.previous === null || since === null) return false
+  return addDays(view.range.from, -view.range.days) >= since
+}
+
 /** The first `limit` of a ranked list, and the rest summed into one "Other" entry when there is a rest. */
 export function withOther(list, limit, valueOf, nameOf = (each) => each.name) {
   const named = list.slice(0, limit).map((each) => ({ name: nameOf(each), value: valueOf(each) }))

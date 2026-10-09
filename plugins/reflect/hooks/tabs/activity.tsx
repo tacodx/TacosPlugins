@@ -1,14 +1,14 @@
 import type { SessionBrief, View } from '../../types'
-import { calendarChart, columnChart } from '../charts.mjs'
+import { calendarCard, columnCard, statCard, textCard } from '../charts.mjs'
 import { count, dayLabel, duration, percent, plural } from '../format.mjs'
 import { busiestHour, calendarOf, columnsOf, lateShare } from '../shape.mjs'
-import { chart, lines, pair, tile } from './parts.tsx'
+import { card } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
 
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const sessionLine = (each: SessionBrief) =>
-  `${each.title ?? 'Untitled'} · ${each.project} · ${duration(each.activeMs)} · ${plural(each.prompts, 'prompt')}`
+  `${each.title ?? 'Untitled'} — ${each.project}, ${duration(each.activeMs)}, ${plural(each.prompts, 'prompt')}`
 
 export function activity(el: Desktop, view: View) {
   const { Box } = el
@@ -20,21 +20,38 @@ export function activity(el: Desktop, view: View) {
 
   return (
     <Box flexDirection="column" gap={1}>
-      {pair(
+      {card(
         el,
-        tile(el, 'active-days', 'Active days', count(t.activeDays), `of ${count(view.range.days)} in this range`),
-        tile(el, 'streak', 'Streak', plural(t.currentStreak, 'day'), `best ${plural(t.bestStreak, 'day')}`),
+        'stats',
+        statCard([
+          { label: 'Active days', figure: count(t.activeDays), note: `of ${count(view.range.days)} in this range` },
+          { label: 'Streak', figure: plural(t.currentStreak, 'day'), note: `best ${plural(t.bestStreak, 'day')}` },
+          {
+            label: 'Busiest hour',
+            figure: busiest === null ? 'n/a' : `${WEEKDAYS[busiest.weekday]} ${String(busiest.hour).padStart(2, '0')}:00`,
+            note: busiest === null ? 'no prompts yet' : plural(busiest.n, 'prompt'),
+          },
+          { label: 'Late prompts', figure: late === null ? 'n/a' : percent(late), note: 'between 22:00 and 05:00' },
+        ]),
+        `Active on ${count(t.activeDays)} of ${count(view.range.days)} days, a streak of ${plural(t.currentStreak, 'day')}`,
       )}
-      {pair(
+      {/* Under eight weeks a calendar is a small square in a wide card; the columns below say the same. */}
+      {view.days.length >= 56 &&
+        card(
+          el,
+          'calendar',
+          calendarCard({ eyebrow: 'Prompts per day', aside: `since ${dayLabel(view.days.slice(-371)[0]?.day ?? view.range.from)}`, calendar: calendarOf(view.days), unit: 'prompts' }),
+          `A calendar of prompts per day, ${count(t.prompts)} in all`,
+        )}
+      {card(el, 'prompts', columnCard({ eyebrow: 'Prompts over time', columns: prompts, format: count, unit: 'prompts' }), `Prompts over time, ${count(t.prompts)} in all`)}
+      {card(
         el,
-        tile(el, 'busiest', 'Busiest hour', busiest === null ? 'n/a' : `${WEEKDAYS[busiest.weekday].slice(0, 3)} ${String(busiest.hour).padStart(2, '0')}:00`, busiest === null ? 'no prompts yet' : plural(busiest.n, 'prompt')),
-        tile(el, 'late', 'Late prompts', late === null ? 'n/a' : percent(late), 'between 22:00 and 05:00'),
+        'sessions',
+        columnCard({ eyebrow: 'Sessions at work', columns: sessions, format: count, unit: 'sessions at work' }),
+        `Sessions with activity over time, ${count(t.sessions)} started in this range`,
       )}
-      {chart(el, 'calendar', 'Prompts per day', calendarChart(calendarOf(view.days), 'prompts'), `A calendar of prompts per day since ${dayLabel(view.range.from)}, ${count(t.prompts)} in all`)}
-      {chart(el, 'prompts', 'Prompts over time', columnChart(prompts, count, 'prompts'), `Prompts over time, ${count(t.prompts)} in all`)}
-      {chart(el, 'sessions', 'Sessions at work', columnChart(sessions, count, 'sessions at work'), `Sessions with activity over time, ${count(t.sessions)} started in this range`)}
-      {lines(el, 'longest', 'Longest sessions', view.sessions.longest.length > 0 ? view.sessions.longest.map(sessionLine) : ['None in this range.'])}
-      {lines(el, 'most-prompts', 'Most prompts in one session', view.sessions.mostPrompts.length > 0 ? view.sessions.mostPrompts.map(sessionLine) : ['None in this range.'])}
+      {card(el, 'longest', textCard({ eyebrow: 'Longest sessions', lines: view.sessions.longest.map(sessionLine) }), 'The sessions that were at work longest')}
+      {card(el, 'most-prompts', textCard({ eyebrow: 'Most prompts in one session', lines: view.sessions.mostPrompts.map(sessionLine) }), 'The sessions with the most prompts')}
     </Box>
   )
 }

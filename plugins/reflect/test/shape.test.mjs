@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { busiestHour, calendarOf, columnsOf, lateShare, withOther } from '../hooks/shape.mjs'
+import { busiestHour, calendarOf, columnsOf, isComparable, lateShare, withOther } from '../hooks/shape.mjs'
 
 /** `n` consecutive days from `first`, each with out = its index + 1 and prompts = 1. */
 function run(first, n) {
@@ -84,4 +84,20 @@ test('the busiest hour and the share of late prompts are read off the weekday gr
   hours[5][2] = 1 // Saturday, small hours
   assert.deepEqual(busiestHour(hours), { weekday: 0, hour: 16, n: 6 })
   assert.equal(lateShare(hours), 0.4)
+})
+
+// Before the transcripts begin only some prompts are known. Comparing with that
+// reads as "up 1,300%", which is a statement about deleted files.
+test('the window before is comparable only when transcripts cover all of it', () => {
+  const view = (transcriptsFrom, previous = { prompts: 1, sessions: 1, out: 1, activeMs: 1 }) => ({
+    range: { id: '30d', from: '2026-02-09', to: '2026-03-10', days: 30 },
+    coverage: { transcriptsFrom, historyFrom: null, workFrom: null },
+    previous,
+  })
+
+  assert.equal(isComparable(view('2026-01-10')), true) // the window before starts exactly there
+  assert.equal(isComparable(view('2026-01-11')), false)
+  assert.equal(isComparable(view('2025-06-01')), true)
+  assert.equal(isComparable(view(null)), false)
+  assert.equal(isComparable(view('2025-06-01', null)), false)
 })

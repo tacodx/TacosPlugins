@@ -1,8 +1,8 @@
 import type { View } from '../../types'
-import { rankBars, shareBar, stackedColumnChart } from '../charts.mjs'
+import { rankCard, shareCard, stackedCard } from '../charts.mjs'
 import { count, dayLabel, monthLabel } from '../format.mjs'
 import { withOther } from '../shape.mjs'
-import { chart } from './parts.tsx'
+import { card } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
 
 export function work(el: Desktop, view: View) {
@@ -32,17 +32,18 @@ export function work(el: Desktop, view: View) {
     return { label: monthLabel(each.month), title: monthLabel(each.month), values }
   })
   const total = types.reduce((sum, each) => sum + each.n, 0)
+  const since = view.coverage.workFrom === null ? '' : `since ${dayLabel(view.coverage.workFrom)}`
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box key="work-count">
-        <Text dimColor>
-          {`${count(total)} notes from claude-mem in this range${view.coverage.workFrom === null ? '' : `, which it has kept since ${dayLabel(view.coverage.workFrom)}`}.`}
-        </Text>
-      </Box>
-      {chart(el, 'types', 'What the work was', shareBar(withOther(types, 4, (each) => each.n), count), `The mix of work types, led by ${types[0]?.name ?? 'none'}`)}
-      {chart(el, 'by-month', 'By month', stackedColumnChart(months, series, count), 'Work types per month')}
-      {chart(el, 'by-project', 'By project', rankBars(view.work.byProject.map((each) => ({ name: each.name, value: each.n })), count), 'Projects ranked by notes')}
+      {card(
+        el,
+        'types',
+        shareCard({ eyebrow: 'What the work was', aside: `${count(total)} notes`, parts: withOther(types, 4, (each) => each.n), format: count }),
+        `${count(total)} notes from claude-mem in this range, led by ${types[0]?.name ?? 'none'}`,
+      )}
+      {card(el, 'by-month', stackedCard({ eyebrow: 'By month', aside: since, columns: months, names: series, format: count }), 'Work types per month')}
+      {card(el, 'by-project', rankCard({ eyebrow: 'By project', aside: 'notes', rows: view.work.byProject.map((each) => ({ name: each.name, value: each.n })), format: count }), 'Projects ranked by notes')}
     </Box>
   )
 }

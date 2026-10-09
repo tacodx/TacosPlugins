@@ -1,7 +1,8 @@
 import type { Tips, View } from '../../types'
+import { textCard } from '../charts.mjs'
 import { count } from '../format.mjs'
 import { observations } from '../notes.mjs'
-import { lines } from './parts.tsx'
+import { card } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
 
 /** `onAsk` starts the model call; this module never sees `$`. */
@@ -13,7 +14,7 @@ export function tips(el: Desktop, view: View, advice: Tips, onAsk: () => void) {
 
   return (
     <Box flexDirection="column" gap={1}>
-      {lines(el, 'observations', 'What the numbers say', plain.length > 0 ? plain : ['Nothing yet: there is no activity in this range.'])}
+      {card(el, 'observations', textCard({ eyebrow: 'What the numbers say', lines: plain }), plain.length > 0 ? plain.join(' ') : 'No activity in this range.')}
       <Box key="tips-ask" flexDirection="column">
         <Text bold>A second reading</Text>
         <Text dimColor>

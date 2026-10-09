@@ -63,6 +63,8 @@ const printed = (over?: Record<string, unknown>) => ran(JSON.stringify(view(over
 const moment = () => new Promise((resolve) => setTimeout(resolve, 30))
 const mounted = ($: any, surface: 'desktop' | 'terminal' = 'desktop') =>
   $.ui.mount({ plugin: 'reflect', surface, component: 'Pane', requestId: 'reflect', props: PANE })
+/** The text of every drawing on screen: the numbers are inside the cards, not beside them. */
+const drawn = async (ui: any) => ((await ui.findAll({ type: 'Svg' })) as any[]).map((svg) => svg.props.source as string).join('\n')
 
 test('/reflect opens the pane and asks the indexer for thirty days', async ($, on) => {
   const opened: unknown[] = []
@@ -101,13 +103,33 @@ test('the overview shows the numbers of the view, with a drawing for each chart'
 
   await ui.press({ key: 'range-30d' })
 
-  expect((await ui.find({ key: 'tile-prompts' }))?.text).toMatch(/1,234/)
-  expect((await ui.find({ key: 'tile-prompts' }))?.text).toMatch(/\+23% on the 30 days before/)
-  expect((await ui.find({ key: 'tile-out' }))?.text).toMatch(/750K/)
-  expect((await ui.find({ key: 'tile-out' }))?.text).toMatch(/Opus 5\.5 wrote 80%/)
-  expect((await ui.find({ key: 'tile-subagents' }))?.text).toMatch(/75%/)
-  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(4)
+  const cards = await drawn(ui)
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(5)
+  expect(cards).toMatch(/<text class="figure hero"[^>]*>750K<\/text>/)
+  expect(cards).toMatch(/<text class="figure stat"[^>]*>1,234<\/text>/)
+  expect(cards).toMatch(/>15 active days</)
+  expect(cards).toMatch(/<text class="figure stat"[^>]*>75%<\/text>/) // subagents wrote 1,200 of 1,600 replies
+  expect(cards).toMatch(/>alpha-site</)
+  expect(cards).toMatch(/>Opus 5\.5</)
+  expect((await ui.find({ key: 'card-hero' }))?.children.length).toBe(1)
   expect((await ui.find({ key: 'footnotes' }))?.text).toMatch(/Prompts since 2025-11-01/)
+})
+
+// The fixture's transcripts begin on the first day of its range, so the thirty days
+// before it are not covered and nothing is compared with them. Move the beginning back
+// and the comparison appears.
+test('a change against the days before is shown only when transcripts cover those days', async ($, on) => {
+  let since = '2026-02-09'
+  on('process.run', async () => printed({ coverage: { transcriptsFrom: since, historyFrom: '2025-11-01', workFrom: null } }))
+  const ui = await mounted($)
+
+  await ui.press({ key: 'range-30d' })
+  expect(await drawn(ui)).not.toMatch(/on the 30 days before/)
+
+  since = '2025-12-01'
+  await ui.press({ key: 'range-30d' })
+  expect(await drawn(ui)).toMatch(/>\+50% on the 30 days before</) // 750K against 500K
+  expect(await drawn(ui)).toMatch(/>\+23% on the days before</) // 1,234 prompts against 1,000
 })
 
 test('every tab draws on the desktop, each drawing within what an Svg may hold', async ($, on) => {
@@ -115,7 +137,7 @@ test('every tab draws on the desktop, each drawing within what an Svg may hold',
   mock.store(on)
   const ui = await mounted($)
   await ui.press({ key: 'range-30d' })
-  const marker = { overview: 'tile-prompts', activity: 'chart-calendar', projects: 'projects-count', models: 'chart-per-day', tools: 'chart-tools', work: 'chart-types', tips: 'lines-observations' }
+  const marker = { overview: 'card-hero', activity: 'card-prompts', projects: 'card-by-tokens', models: 'card-per-day', tools: 'card-tools', work: 'card-types', tips: 'card-observations' }
 
   for (const tab of TABS) {
     await ui.press({ key: `tab-${tab}` })
@@ -183,7 +205,7 @@ test('a failed run shows the reason and a way to try again', async ($, on) => {
   works = true
   await ui.press({ key: 'retry' })
   expect(await ui.find({ key: 'problem' })).toBeUndefined()
-  expect(await ui.find({ key: 'tile-prompts' })).toBeDefined()
+  expect(await ui.find({ key: 'card-hero' })).toBeDefined()
 })
 
 test('output that is not a view is a failure, not a blank pane', async ($, on) => {
@@ -218,7 +240,7 @@ test('a failed refresh keeps the last good view on screen', async ($, on) => {
   await ui.press({ key: 'range-7d' })
 
   expect((await ui.find({ key: 'problem' }))?.text).toMatch(/boom/)
-  expect(await ui.find({ key: 'tile-prompts' })).toBeDefined()
+  expect(await ui.find({ key: 'card-hero' })).toBeDefined()
 })
 
 test('an older refresh that finishes last does not replace a newer one', async ($, on) => {
@@ -236,7 +258,7 @@ test('an older refresh that finishes last does not replace a newer one', async (
   finishSlow(printed({ totals: { ...view().totals, prompts: 7 } }))
   await slow
 
-  expect((await ui.find({ key: 'tile-prompts' }))?.text).toMatch(/9,000/)
+  expect(await drawn(ui)).toMatch(/<text class="figure stat"[^>]*>9,000<\/text>/)
   expect((await ui.find({ key: 'range-90d' }))?.props.variant).toBe('primary')
 })
 

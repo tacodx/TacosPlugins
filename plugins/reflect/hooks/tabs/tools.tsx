@@ -1,7 +1,7 @@
 import type { Ranked, View } from '../../types'
-import { rankBars } from '../charts.mjs'
+import { rankCard, statCard } from '../charts.mjs'
 import { count, percent, plural } from '../format.mjs'
-import { chart, pair, tile } from './parts.tsx'
+import { card } from './parts.tsx'
 import type { Desktop } from './parts.tsx'
 
 // A tool of an MCP server is named mcp__<server>__<tool>, and a skill <plugin>:<skill>.
@@ -21,14 +21,18 @@ export function tools(el: Desktop, view: View) {
 
   return (
     <Box flexDirection="column" gap={1}>
-      {pair(
+      {card(
         el,
-        tile(el, 'calls', 'Tool calls', count(t.toolCalls), first !== undefined && t.toolCalls > 0 ? `${first.name} is ${percent(first.n / t.toolCalls)} of them` : 'none yet'),
-        tile(el, 'subagents', 'Subagent share', replies > 0 ? percent(t.subMsgs / replies) : 'n/a', `of ${plural(replies, 'reply', 'replies')}`),
+        'stats',
+        statCard([
+          { label: 'Tool calls', figure: count(t.toolCalls), note: first !== undefined && t.toolCalls > 0 ? `${percent(first.n / t.toolCalls)} of them ${first.name}` : 'none yet' },
+          { label: 'Subagent share', figure: replies > 0 ? percent(t.subMsgs / replies) : 'n/a', note: `of ${plural(replies, 'reply', 'replies')}` },
+        ]),
+        `${count(t.toolCalls)} tool calls`,
       )}
-      {chart(el, 'tools', 'Most used tools', rankBars(rows(view.tools), count), `The most used tools, of ${count(t.toolCalls)} calls`)}
-      {chart(el, 'skills', 'Skills', rankBars(rows(view.skills), count), 'Skills ranked by how often they were loaded')}
-      {chart(el, 'mcp', 'MCP servers', rankBars(rows(view.mcp), count), 'MCP servers ranked by calls to their tools')}
+      {card(el, 'tools', rankCard({ eyebrow: 'Most used tools', aside: 'calls', rows: rows(view.tools), format: count }), `The most used tools, of ${count(t.toolCalls)} calls`)}
+      {card(el, 'skills', rankCard({ eyebrow: 'Skills', aside: 'times loaded', rows: rows(view.skills), format: count }), 'Skills ranked by how often they were loaded')}
+      {card(el, 'mcp', rankCard({ eyebrow: 'MCP servers', aside: 'calls', rows: rows(view.mcp), format: count }), 'MCP servers ranked by calls to their tools')}
     </Box>
   )
 }

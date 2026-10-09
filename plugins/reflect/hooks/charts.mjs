@@ -1,44 +1,114 @@
-// SVG builders: numbers in, one <svg> string out. Pure: no Node, no engine.
+// The pane's drawings: numbers in, one <svg> card out. Pure: no Node, no engine.
 //
-// Every drawing is 360 units wide, the width of a docked pane. Colours are a
-// palette validated for colour-blind separation on a light and on a dark
-// surface: the light steps by default, the dark ones under prefers-color-scheme.
-// Text stays in ink, never in a series colour. A mod's SVG cannot run scripts,
-// so the hover layer is a <title> on every mark.
+// A mod cannot know whether the app around it is light or dark, and outside an
+// Svg element it has only plain text to draw with. So every card brings its own
+// surface and type and looks the same wherever it lands: a dark instrument
+// panel, serif figures over monospace labels.
+//
+// Colour is used for two jobs only. Where a chart has one series, its marks are
+// neutral and the peak alone is lit in the accent, with its value written beside
+// it. Where the series are different things (models, kinds of work), they take
+// a categorical palette validated for colour-blind separation on a dark surface,
+// in fixed order, and "Other" is always neutral. Text stays in ink.
+//
+// A mod's SVG cannot run scripts, so the hover layer is a <title> on every mark.
 import { dayLabel, percent } from './format.mjs'
 
 export const WIDTH = 360
 /** A mod's Svg element takes at most this many characters. */
 export const SVG_LIMIT = 131072
 
+const PAD = 16
+const INNER = WIDTH - 2 * PAD
+const SURFACE = '#161615'
+const EDGE = '#2b2b28'
+const RULE = '#262623'
+const INK = '#f1eee6'
+const INK_2 = '#b9b5a8'
+const INK_3 = '#8a877c'
+const MARK = '#8f8b80'
+const PEAK = '#e3855e'
+const EMPTY = '#21211f'
+/** Up to four named series, in this order; anything past them, and "Other", is neutral. */
+const SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500']
+const NEUTRAL = '#6b685f'
+
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-/** Classes for up to four named series, then the neutral one for "Other". */
-const SERIES = ['s1', 's2', 's3', 's4']
+const MONO = '"JetBrains Mono","JetBrainsMono Nerd Font","Cascadia Mono","SF Mono","Noto Sans Mono","DejaVu Sans Mono",monospace'
+const SERIF = '"Noto Serif","Source Serif 4","New York",Georgia,"DejaVu Serif",serif'
+// A monospace glyph is six tenths of its size wide, near enough to cut and wrap text by.
+const GLYPH = 0.6
 
 const STYLE = `
-text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#898781}
-.ink{fill:#52514e}
-.grid{stroke:#898781;stroke-opacity:.25;stroke-width:1}
-.zero{fill:#898781;fill-opacity:.12}
-.s0{fill:#898781}.s1{fill:#2a78d6}.s2{fill:#eb6834}.s3{fill:#1baf7a}.s4{fill:#eda100}
-.mark:hover{stroke:#898781;stroke-width:1.5}
-@media (prefers-color-scheme: dark){
-.ink{fill:#c3c2b7}.s1{fill:#3987e5}.s2{fill:#d95926}.s3{fill:#199e70}.s4{fill:#c98500}
-}`
+text{font-family:${MONO};font-size:10px;fill:${INK_2}}
+.eyebrow{fill:${INK_3};letter-spacing:.09em}
+.dim{fill:${INK_3}}
+.ink{fill:${INK}}
+.figure{font-family:${SERIF};fill:${INK}}
+.hero{font-size:46px}
+.stat{font-size:21px}
+.rule{stroke:${RULE};stroke-width:1}
+.mark{fill:${MARK}}
+.peak{fill:${PEAK}}
+.empty{fill:${EMPTY}}
+.hot:hover{fill:${INK}}
+.s:hover{stroke:${INK};stroke-width:1}
+.rise{transform-box:fill-box;transform-origin:50% 100%;animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
+.run{transform-box:fill-box;transform-origin:0 50%;animation:run .5s cubic-bezier(.2,.7,.2,1) both}
+@keyframes rise{from{transform:scaleY(0)}}
+@keyframes run{from{transform:scaleX(0)}}
+@media (prefers-reduced-motion: reduce){.rise,.run{animation:none}}`
 
 const esc = (value) =>
   String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const shorten = (name, max) => (name.length > max ? `${name.slice(0, max - 1)}…` : name)
-const open = (height) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${height}" width="${WIDTH}" height="${height}"><style>${STYLE}</style>`
-const colourOf = (name, i) => (name === 'Other' || i >= SERIES.length ? 's0' : SERIES[i])
+/** `text` cut to what fits in `width` units at `size`, with an ellipsis when cut. */
+function fit(text, width, size = 10) {
+  const max = Math.max(1, Math.floor(width / (size * GLYPH)))
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+/** `text` broken into lines of at most `max` characters, at spaces where it can. */
+export function wrap(text, max) {
+  const lines = []
+  let line = ''
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    let rest = word
+    while (rest.length > max) {
+      if (line !== '') lines.push(line)
+      lines.push(rest.slice(0, max))
+      rest = rest.slice(max)
+      line = ''
+    }
+    if (line === '') line = rest
+    else if (line.length + 1 + rest.length <= max) line += ` ${rest}`
+    else {
+      lines.push(line)
+      line = rest
+    }
+  }
+  if (line !== '') lines.push(line)
+  return lines
+}
+const colourOf = (name, i) => (name === 'Other' || i >= SERIES.length ? NEUTRAL : SERIES[i])
+
+// Every card: the surface, a hairline edge, and a small caption top left with
+// an optional remark top right. What the card holds starts at y = 40.
+function open(height, eyebrow = '', aside = '') {
+  const parts = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${height}" width="${WIDTH}" height="${height}"><style>${STYLE}</style>`,
+    `<rect x=".5" y=".5" width="${WIDTH - 1}" height="${height - 1}" rx="10" fill="${SURFACE}" stroke="${EDGE}"/>`,
+  ]
+  const room = aside === '' ? INNER : INNER - (aside.length + 2) * 10 * GLYPH * 1.09
+  if (eyebrow !== '') parts.push(`<text class="eyebrow" x="${PAD}" y="25">${esc(fit(eyebrow.toUpperCase(), room / 1.09))}</text>`)
+  if (aside !== '') parts.push(`<text class="eyebrow" x="${WIDTH - PAD}" y="25" text-anchor="end">${esc(aside.toUpperCase())}</text>`)
+  return parts
+}
 
 // A drawing that is too large is not drawn at all by the pane, and the pane with it.
 function close(parts) {
   parts.push('</svg>')
   const svg = parts.join('')
   if (svg.length <= SVG_LIMIT) return svg
-  return `${open(20)}<text x="0" y="13">Too much to draw here.</text></svg>`
+  return [...open(56, 'Too much to draw'), `<text x="${PAD}" y="42">This range has more than fits in one drawing.</text>`, '</svg>'].join('')
 }
 
 // The top of the axis: the next round number, from a ladder fine enough that the
@@ -55,153 +125,245 @@ function niceMax(value) {
 }
 
 // A column is at most this wide, however few there are, and sits in the middle of its slot.
-const MAX_BAR = 24
+const MAX_BAR = 22
 function slot(i, step, gap, left) {
   const width = Math.min(MAX_BAR, Math.max(1, step - gap))
   return { x: left + i * step + (step - width) / 2, width }
 }
+const gapFor = (step) => (step > 6 ? 2 : step > 3 ? 1 : 0)
+const peakOf = (values) => values.reduce((best, value, i) => (value > values[best] ? i : best), 0)
 
-// The frame every column chart shares: three gridlines with their values, and
-// the first, middle and last column named along the bottom.
-function columnFrame(parts, columns, max, format, { left, top, plot }) {
-  for (const share of [0, 0.5, 1]) {
-    const y = top + plot - share * plot
-    parts.push(`<line class="grid" x1="${left}" x2="${WIDTH}" y1="${y}" y2="${y}"/>`)
-    parts.push(`<text x="${left - 5}" y="${y + 4}" text-anchor="end">${share === 0 ? '0' : esc(format(max * share))}</text>`)
-  }
+// The first and last column named along the bottom, and the middle one when there is room.
+function columnLabels(parts, columns, left, right, y) {
   if (columns.length === 0) return
-  const step = (WIDTH - left) / columns.length
+  const step = (right - left) / columns.length
   const last = columns.length - 1
   const seen = new Set()
   for (const [i, anchor] of [[0, 'start'], [Math.floor(last / 2), 'middle'], [last, 'end']]) {
     if (seen.has(i)) continue
     seen.add(i)
-    const x = anchor === 'start' ? left : anchor === 'end' ? WIDTH : left + (i + 0.5) * step
-    parts.push(`<text x="${x.toFixed(1)}" y="${top + plot + 16}" text-anchor="${anchor}">${esc(columns[i].label)}</text>`)
+    const x = anchor === 'start' ? left : anchor === 'end' ? right : left + (i + 0.5) * step
+    parts.push(`<text class="dim" x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}">${esc(columns[i].label)}</text>`)
   }
 }
 
-// A legend in two columns: a swatch, the name in ink, and the value after it.
-function legend(parts, items, y, valueOf) {
-  items.forEach((each, i) => {
-    const x = (i % 2) * (WIDTH / 2)
-    const row = y + Math.floor(i / 2) * 17
-    parts.push(`<rect class="${colourOf(each.name, i)}" x="${x}" y="${row}" width="9" height="9" rx="2"/>`)
-    parts.push(
-      `<text class="ink" x="${x + 14}" y="${row + 9}">${esc(shorten(each.name, 14))} ` +
-        `<tspan fill-opacity=".7">${esc(valueOf(each))}</tspan></text>`,
-    )
-  })
-  return Math.ceil(items.length / 2) * 17
+// The peak's own caption: what it is and how much, kept inside the card's edges.
+function peakCaption(parts, text, x, y, left, right) {
+  const half = (text.length * 10 * GLYPH) / 2
+  const at = Math.min(right - half, Math.max(left + half, x))
+  parts.push(`<text class="ink" x="${at.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle">${esc(text)}</text>`)
 }
 
 /**
- * One series as columns.
- * @param {{ label: string, title: string, value: number }[]} columns
- * @param {(n: number) => string} format how a value reads, on the axis and in the tooltip
- * @param {string} unit what the value counts, for the tooltip ("output tokens")
+ * The lead card of a tab: one large figure, what moved, and its history as a strip of columns.
+ * @param {{ eyebrow: string, aside?: string, figure: string, unit: string, note?: string,
+ *           columns: { label: string, title: string, value: number }[], format: (n: number) => string }} card
  */
-export function columnChart(columns, format, unit) {
-  const frame = { left: 34, top: 8, plot: 96 }
-  const max = niceMax(Math.max(0, ...columns.map((each) => each.value)))
-  const step = (WIDTH - frame.left) / Math.max(1, columns.length)
-  const gap = step > 6 ? 2 : step > 3 ? 1 : 0
-  const parts = [open(frame.top + frame.plot + 22)]
-  columnFrame(parts, columns, max, format, frame)
+export function heroCard({ eyebrow, aside = '', figure, unit, note = '', columns, format }) {
+  const top = 112
+  const plot = 62
+  const parts = open(top + plot + 34, eyebrow, aside)
+  parts.push(`<text class="figure hero" x="${PAD}" y="76">${esc(figure)}</text>`)
+  const after = PAD + figure.length * 46 * 0.56 + 10
+  parts.push(`<text class="dim" x="${after.toFixed(1)}" y="62">${esc(fit(unit, WIDTH - PAD - after))}</text>`)
+  if (note !== '') parts.push(`<text x="${after.toFixed(1)}" y="76">${esc(fit(note, WIDTH - PAD - after))}</text>`)
 
+  const values = columns.map((each) => each.value)
+  const max = Math.max(1, ...values)
+  const peak = peakOf(values)
+  const step = INNER / Math.max(1, columns.length)
+  const gap = gapFor(step)
+  parts.push(`<line class="rule" x1="${PAD}" x2="${WIDTH - PAD}" y1="${top + plot + 0.5}" y2="${top + plot + 0.5}"/>`)
   columns.forEach((each, i) => {
     if (each.value <= 0) return
-    const { x, width } = slot(i, step, gap, frame.left)
-    const height = Math.max(1.5, (each.value / max) * frame.plot)
+    const { x, width } = slot(i, step, gap, PAD)
+    const height = Math.max(1.5, (each.value / max) * plot)
     parts.push(
-      `<rect class="s1 mark" x="${x.toFixed(1)}" y="${(frame.top + frame.plot - height).toFixed(1)}" ` +
-        `width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="${Math.min(2, width / 2).toFixed(1)}">` +
+      `<rect class="${i === peak ? 'peak' : 'mark'} hot rise" x="${x.toFixed(1)}" y="${(top + plot - height).toFixed(1)}" ` +
+        `width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="${Math.min(1.5, width / 2).toFixed(1)}">` +
         `<title>${esc(each.title)}: ${esc(format(each.value))} ${esc(unit)}</title></rect>`,
     )
+  })
+  if (columns.length > 0 && values[peak] > 0) {
+    const { x, width } = slot(peak, step, gap, PAD)
+    peakCaption(parts, `${columns[peak].title} · ${format(values[peak])}`, x + width / 2, top - 6, PAD, WIDTH - PAD)
+  }
+  columnLabels(parts, columns, PAD, WIDTH - PAD, top + plot + 18)
+  return close(parts)
+}
+
+/**
+ * Headline numbers, two to a row.
+ * @param {{ label: string, figure: string, note: string }[]} items
+ */
+export function statCard(items) {
+  const row = 62
+  const rows = Math.ceil(items.length / 2)
+  const half = WIDTH / 2
+  const parts = open(rows * row + 12)
+  for (let r = 1; r < rows; r += 1) {
+    parts.push(`<line class="rule" x1="${PAD}" x2="${WIDTH - PAD}" y1="${r * row + 6.5}" y2="${r * row + 6.5}"/>`)
+  }
+  if (items.length > 1) parts.push(`<line class="rule" x1="${half + 0.5}" x2="${half + 0.5}" y1="14" y2="${rows * row - 2}"/>`)
+  items.forEach((each, i) => {
+    const x = (i % 2) * half + PAD
+    const y = Math.floor(i / 2) * row + 6
+    const room = half - 2 * PAD + 8
+    parts.push(`<text class="eyebrow" x="${x}" y="${y + 20}">${esc(fit(each.label.toUpperCase(), room / 1.09))}</text>`)
+    parts.push(`<text class="figure stat" x="${x}" y="${y + 43}">${esc(each.figure)}</text>`)
+    parts.push(`<text class="dim" x="${x}" y="${y + 57}">${esc(fit(each.note, room))}<title>${esc(each.note)}</title></text>`)
   })
   return close(parts)
 }
 
 /**
- * Several series stacked into columns, with a legend.
- * @param {{ label: string, title: string, values: Record<string, number> }[]} columns
- * @param {string[]} names the series, in the order their colours are given; "Other" is neutral
- * @param {(name: string) => string} [nameOf] how a series is called in the legend and tooltips
+ * One series as columns, the tallest lit and captioned.
+ * @param {{ eyebrow: string, aside?: string, columns: { label: string, title: string, value: number }[],
+ *           format: (n: number) => string, unit: string }} card
  */
-export function stackedColumnChart(columns, names, format, nameOf = (name) => name) {
-  const frame = { left: 34, top: 8, plot: 96 }
+export function columnCard({ eyebrow, aside = '', columns, format, unit }) {
+  const left = PAD + 30
+  const top = 54
+  const plot = 84
+  const values = columns.map((each) => each.value)
+  const max = niceMax(Math.max(0, ...values))
+  const peak = peakOf(values)
+  const step = (WIDTH - PAD - left) / Math.max(1, columns.length)
+  const gap = gapFor(step)
+  const parts = open(top + plot + 34, eyebrow, aside)
+
+  for (const share of [0, 0.5, 1]) {
+    const y = top + plot - share * plot + 0.5
+    parts.push(`<line class="rule" x1="${left}" x2="${WIDTH - PAD}" y1="${y}" y2="${y}"/>`)
+    parts.push(`<text class="dim" x="${left - 6}" y="${y + 3}" text-anchor="end">${share === 0 ? '0' : esc(format(max * share))}</text>`)
+  }
+  columns.forEach((each, i) => {
+    if (each.value <= 0) return
+    const { x, width } = slot(i, step, gap, left)
+    const height = Math.max(1.5, (each.value / max) * plot)
+    parts.push(
+      `<rect class="${i === peak ? 'peak' : 'mark'} hot rise" x="${x.toFixed(1)}" y="${(top + plot - height).toFixed(1)}" ` +
+        `width="${width.toFixed(1)}" height="${height.toFixed(1)}" rx="${Math.min(1.5, width / 2).toFixed(1)}">` +
+        `<title>${esc(each.title)}: ${esc(format(each.value))} ${esc(unit)}</title></rect>`,
+    )
+  })
+  if (columns.length > 0 && values[peak] > 0) {
+    const { x, width } = slot(peak, step, gap, left)
+    const height = (values[peak] / max) * plot
+    peakCaption(parts, `${columns[peak].title} · ${format(values[peak])}`, x + width / 2, top + plot - height - 5, left, WIDTH - PAD)
+  }
+  columnLabels(parts, columns, left, WIDTH - PAD, top + plot + 18)
+  return close(parts)
+}
+
+// A list of series under a chart: a swatch and a name on the left, the value and its share on the right.
+function seriesRows(parts, items, top, format) {
+  const total = items.reduce((sum, each) => sum + each.value, 0) || 1
+  items.forEach((each, i) => {
+    const y = top + i * 18
+    parts.push(`<rect x="${PAD}" y="${y - 8}" width="8" height="8" rx="2" fill="${colourOf(each.name, i)}"/>`)
+    parts.push(`<text x="${PAD + 14}" y="${y}">${esc(fit(each.name, 170))}<title>${esc(each.name)}</title></text>`)
+    parts.push(`<text class="ink" x="${WIDTH - PAD - 44}" y="${y}" text-anchor="end">${esc(format(each.value))}</text>`)
+    parts.push(`<text class="dim" x="${WIDTH - PAD}" y="${y}" text-anchor="end">${esc(percent(each.value / total))}</text>`)
+  })
+  return items.length * 18
+}
+
+/**
+ * Several series stacked into columns, with the series listed beneath.
+ * @param {{ eyebrow: string, aside?: string, columns: { label: string, title: string, values: Record<string, number> }[],
+ *           names: string[], format: (n: number) => string, nameOf?: (name: string) => string }} card
+ *   `names` in the order their colours are given; "Other" is neutral
+ */
+export function stackedCard({ eyebrow, aside = '', columns, names, format, nameOf = (name) => name }) {
+  const left = PAD + 30
+  const top = 44
+  const plot = 84
   const totalOf = (each) => names.reduce((sum, name) => sum + (each.values[name] ?? 0), 0)
   const max = niceMax(Math.max(0, ...columns.map(totalOf)))
-  const step = (WIDTH - frame.left) / Math.max(1, columns.length)
-  const gap = step > 6 ? 2 : step > 3 ? 1 : 0
-  const legendTop = frame.top + frame.plot + 30
-  const parts = [open(legendTop + Math.ceil(names.length / 2) * 17)]
-  columnFrame(parts, columns, max, format, frame)
+  const step = (WIDTH - PAD - left) / Math.max(1, columns.length)
+  const gap = gapFor(step)
+  const listTop = top + plot + 44
+  const parts = open(listTop + names.length * 18, eyebrow, aside)
 
+  for (const share of [0, 0.5, 1]) {
+    const y = top + plot - share * plot + 0.5
+    parts.push(`<line class="rule" x1="${left}" x2="${WIDTH - PAD}" y1="${y}" y2="${y}"/>`)
+    parts.push(`<text class="dim" x="${left - 6}" y="${y + 3}" text-anchor="end">${share === 0 ? '0' : esc(format(max * share))}</text>`)
+  }
   columns.forEach((each, i) => {
-    const { x, width } = slot(i, step, gap, frame.left)
-    let y = frame.top + frame.plot
+    const { x, width } = slot(i, step, gap, left)
+    let y = top + plot
     names.forEach((name, series) => {
       const value = each.values[name] ?? 0
       if (value <= 0) return
-      const height = (value / max) * frame.plot
+      const height = (value / max) * plot
       y -= height
       parts.push(
-        `<rect class="${colourOf(name, series)} mark" x="${x.toFixed(1)}" y="${y.toFixed(1)}" ` +
-          `width="${width.toFixed(1)}" height="${Math.max(0.5, height - 0.5).toFixed(1)}">` +
+        `<rect class="s" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" ` +
+          `height="${Math.max(0.5, height - 0.5).toFixed(1)}" fill="${colourOf(name, series)}">` +
           `<title>${esc(each.title)}, ${esc(nameOf(name))}: ${esc(format(value))}</title></rect>`,
       )
     })
   })
+  columnLabels(parts, columns, left, WIDTH - PAD, top + plot + 18)
   const totals = names.map((name) => ({ name: nameOf(name), value: columns.reduce((sum, each) => sum + (each.values[name] ?? 0), 0) }))
-  legend(parts, totals, legendTop, (each) => format(each.value))
+  // The legend keeps each series' own colour slot, so "Other" stays neutral under any display name.
+  totals.forEach((each, i) => {
+    const y = listTop + i * 18
+    parts.push(`<rect x="${PAD}" y="${y - 8}" width="8" height="8" rx="2" fill="${colourOf(names[i], i)}"/>`)
+    parts.push(`<text x="${PAD + 14}" y="${y}">${esc(fit(each.name, 200))}</text>`)
+    parts.push(`<text class="ink" x="${WIDTH - PAD}" y="${y}" text-anchor="end">${esc(format(each.value))}</text>`)
+  })
   return close(parts)
 }
 
-/** Prompts by weekday and hour. @param {number[][]} hours 7 rows from Monday, 24 columns */
-export function hourGrid(hours) {
-  const left = 30
-  const top = 2
-  const cell = (WIDTH - left) / 24
+/** Prompts by weekday and hour, the busiest cell lit. @param {{ eyebrow: string, aside?: string, hours: number[][] }} card */
+export function hourCard({ eyebrow, aside = '', hours }) {
+  const left = PAD + 26
+  const top = 40
+  const cell = (WIDTH - PAD - left) / 24
   const row = 15
-  const max = Math.max(1, ...hours.flat())
-  const parts = [open(top + 7 * row + 16)]
+  const flat = hours.flat()
+  const max = Math.max(1, ...flat)
+  const peak = flat.indexOf(max)
+  const parts = open(top + 7 * row + 26, eyebrow, aside)
 
   hours.forEach((counts, r) => {
-    parts.push(`<text x="0" y="${top + r * row + 10}">${WEEKDAYS[r]}</text>`)
+    parts.push(`<text class="dim" x="${PAD}" y="${top + r * row + 10}">${WEEKDAYS[r]}</text>`)
     counts.forEach((n, hour) => {
       const shape = `x="${(left + hour * cell).toFixed(1)}" y="${top + r * row}" width="${(cell - 1.5).toFixed(1)}" height="${row - 2}" rx="2"`
       const label = `<title>${WEEKDAYS[r]} ${String(hour).padStart(2, '0')}:00: ${n} prompts</title>`
-      parts.push(
-        n > 0
-          ? `<rect class="s1 mark" fill-opacity="${(0.18 + (0.82 * n) / max).toFixed(2)}" ${shape}>${label}</rect>`
-          : `<rect class="zero" ${shape}>${label}</rect>`,
-      )
+      if (n <= 0) parts.push(`<rect class="empty" ${shape}>${label}</rect>`)
+      else if (r * 24 + hour === peak) parts.push(`<rect class="peak hot" ${shape}>${label}</rect>`)
+      else parts.push(`<rect class="mark hot" fill-opacity="${(0.22 + (0.78 * n) / max).toFixed(2)}" ${shape}>${label}</rect>`)
     })
   })
   for (const hour of [0, 6, 12, 18]) {
-    parts.push(`<text x="${(left + hour * cell).toFixed(1)}" y="${top + 7 * row + 11}">${String(hour).padStart(2, '0')}:00</text>`)
+    parts.push(`<text class="dim" x="${(left + hour * cell).toFixed(1)}" y="${top + 7 * row + 12}">${String(hour).padStart(2, '0')}:00</text>`)
   }
   return close(parts)
 }
 
 /**
- * A calendar: one column per week, one cell per day, darker for more.
- * @param {{ weeks: ({ day: string, value: number } | null)[][], months: { column: number, label: string }[] }} calendar
- * @param {string} unit what a day's value counts, for the tooltip ("prompts")
+ * A calendar: one column per week, one cell per day, brighter for more, the best day lit.
+ * @param {{ eyebrow: string, aside?: string, unit: string,
+ *           calendar: { weeks: ({ day: string, value: number } | null)[][], months: { column: number, label: string }[] } }} card
  */
-export function calendarChart({ weeks, months }, unit) {
-  const left = 26
-  const top = 14
-  const cell = Math.min(13, (WIDTH - left) / Math.max(1, weeks.length))
-  const max = Math.max(1, ...weeks.flat().map((each) => each?.value ?? 0))
-  const parts = [open(top + 7 * cell + 4)]
+export function calendarCard({ eyebrow, aside = '', calendar: { weeks, months }, unit }) {
+  const left = PAD + 26
+  const top = 54
+  const cell = Math.min(13, (WIDTH - PAD - left) / Math.max(1, weeks.length))
+  const days = weeks.flat().filter((each) => each !== null)
+  const max = Math.max(1, ...days.map((each) => each.value))
+  const best = days.find((each) => each.value === max && max > 0)?.day
+  const parts = open(top + 7 * cell + 14, eyebrow, aside)
 
   for (const { column, label } of months) {
-    parts.push(`<text x="${(left + column * cell).toFixed(1)}" y="10">${esc(label)}</text>`)
+    parts.push(`<text class="dim" x="${(left + column * cell).toFixed(1)}" y="${top - 6}">${esc(label)}</text>`)
   }
   for (const r of [0, 2, 4, 6]) {
-    parts.push(`<text x="0" y="${(top + r * cell + cell * 0.75).toFixed(1)}">${WEEKDAYS[r]}</text>`)
+    parts.push(`<text class="dim" x="${PAD}" y="${(top + r * cell + cell * 0.75).toFixed(1)}">${WEEKDAYS[r]}</text>`)
   }
   weeks.forEach((week, column) => {
     week.forEach((each, r) => {
@@ -210,57 +372,88 @@ export function calendarChart({ weeks, months }, unit) {
         `x="${(left + column * cell).toFixed(1)}" y="${(top + r * cell).toFixed(1)}" ` +
         `width="${(cell - 1.5).toFixed(1)}" height="${(cell - 1.5).toFixed(1)}" rx="2"`
       const label = `<title>${dayLabel(each.day)}: ${each.value} ${esc(unit)}</title>`
-      parts.push(
-        each.value > 0
-          ? `<rect class="s1 mark" fill-opacity="${(0.18 + (0.82 * each.value) / max).toFixed(2)}" ${shape}>${label}</rect>`
-          : `<rect class="zero" ${shape}>${label}</rect>`,
-      )
+      if (each.value <= 0) parts.push(`<rect class="empty" ${shape}>${label}</rect>`)
+      else if (each.day === best) parts.push(`<rect class="peak hot" ${shape}>${label}</rect>`)
+      else parts.push(`<rect class="mark hot" fill-opacity="${(0.22 + (0.78 * each.value) / max).toFixed(2)}" ${shape}>${label}</rect>`)
     })
   })
   return close(parts)
 }
 
 /**
- * Ranked horizontal bars.
- * @param {{ name: string, value: number, label?: string }[]} rows `label` is drawn in place of
- *   a long `name`, which stays in the tooltip
+ * Ranked horizontal bars, the first lit.
+ * @param {{ eyebrow: string, aside?: string, format: (n: number) => string,
+ *           rows: { name: string, value: number, label?: string }[] }} card
+ *   a row's `label` is drawn in place of a long `name`, which stays in the tooltip
  */
-export function rankBars(rows, format) {
-  const rowHeight = 20
-  const labelWidth = 124
+export function rankCard({ eyebrow, aside = '', rows, format }) {
+  const top = 40
+  const rowHeight = 22
+  const labelWidth = 128
   const valueWidth = 52
-  const barWidth = WIDTH - labelWidth - valueWidth - 6
+  const barLeft = PAD + labelWidth
+  const barWidth = INNER - labelWidth - valueWidth
   const max = Math.max(1, ...rows.map((each) => each.value))
-  const parts = [open(Math.max(1, rows.length) * rowHeight)]
+  const parts = open(top + Math.max(1, rows.length) * rowHeight + 6, eyebrow, aside)
 
-  if (rows.length === 0) parts.push('<text x="0" y="13">Nothing in this range.</text>')
+  if (rows.length === 0) parts.push(`<text class="dim" x="${PAD}" y="${top + 12}">Nothing in this range.</text>`)
   rows.forEach((each, i) => {
-    const y = i * rowHeight
+    const y = top + i * rowHeight
     const width = Math.max(1.5, (each.value / max) * barWidth)
-    parts.push(`<text class="ink" x="0" y="${y + 13}">${esc(shorten(each.label ?? each.name, 18))}<title>${esc(each.name)}</title></text>`)
+    parts.push(`<text x="${PAD}" y="${y + 13}">${esc(fit(each.label ?? each.name, labelWidth - 8))}<title>${esc(each.name)}</title></text>`)
+    parts.push(`<rect class="empty" x="${barLeft}" y="${y + 5}" width="${barWidth}" height="9" rx="2"/>`)
     parts.push(
-      `<rect class="s1 mark" x="${labelWidth}" y="${y + 4}" width="${width.toFixed(1)}" height="10" rx="2">` +
+      `<rect class="${i === 0 ? 'peak' : 'mark'} hot run" x="${barLeft}" y="${y + 5}" width="${width.toFixed(1)}" height="9" rx="2">` +
         `<title>${esc(each.name)}: ${esc(format(each.value))}</title></rect>`,
     )
-    parts.push(`<text class="ink" x="${WIDTH}" y="${y + 13}" text-anchor="end">${esc(format(each.value))}</text>`)
+    parts.push(`<text class="ink" x="${WIDTH - PAD}" y="${y + 13}" text-anchor="end">${esc(format(each.value))}</text>`)
   })
   return close(parts)
 }
 
-/** One stacked bar of shares with its legend. At most four named parts and an "Other". */
-export function shareBar(parts, format) {
-  const total = parts.reduce((sum, each) => sum + each.value, 0) || 1
-  const out = [open(12 + 10 + Math.ceil(parts.length / 2) * 17)]
+/**
+ * One bar cut into shares, with each share listed beneath. At most four named parts and an "Other".
+ * @param {{ eyebrow: string, aside?: string, parts: { name: string, value: number }[], format: (n: number) => string }} card
+ */
+export function shareCard({ eyebrow, aside = '', parts: shares, format }) {
+  const top = 40
+  const total = shares.reduce((sum, each) => sum + each.value, 0) || 1
+  const parts = open(top + 30 + Math.max(1, shares.length) * 18, eyebrow, aside)
 
-  let x = 0
-  parts.forEach((each, i) => {
-    const width = Math.max(2, (each.value / total) * (WIDTH - 2 * (parts.length - 1)))
-    out.push(
-      `<rect class="${colourOf(each.name, i)} mark" x="${x.toFixed(1)}" y="0" width="${width.toFixed(1)}" height="12" rx="2">` +
+  if (shares.length === 0) parts.push(`<text class="dim" x="${PAD}" y="${top + 12}">Nothing in this range.</text>`)
+  let x = PAD
+  shares.forEach((each, i) => {
+    const width = Math.max(2, (each.value / total) * (INNER - 2 * (shares.length - 1)))
+    parts.push(
+      `<rect class="s run" x="${x.toFixed(1)}" y="${top}" width="${width.toFixed(1)}" height="10" rx="2" fill="${colourOf(each.name, i)}">` +
         `<title>${esc(each.name)}: ${esc(format(each.value))} (${esc(percent(each.value / total))})</title></rect>`,
     )
     x += width + 2
   })
-  legend(out, parts, 22, (each) => `${format(each.value)} · ${percent(each.value / total)}`)
-  return close(out)
+  seriesRows(parts, shares, top + 34, format)
+  return close(parts)
+}
+
+/**
+ * Sentences in a card, each with a small mark in front and wrapped to the card's width.
+ * @param {{ eyebrow: string, aside?: string, lines: string[] }} card
+ */
+export function textCard({ eyebrow, aside = '', lines }) {
+  const top = 48
+  const lineHeight = 15
+  const max = Math.floor((INNER - 14) / (10 * GLYPH))
+  const wrapped = lines.map((line) => wrap(line, max))
+  const height = wrapped.reduce((sum, block) => sum + block.length * lineHeight + 7, 0)
+  const parts = open(top + Math.max(height, lineHeight) - 2, eyebrow, aside)
+
+  let y = top
+  for (const block of wrapped) {
+    parts.push(`<rect class="peak" x="${PAD}" y="${y - 7}" width="5" height="5" rx="1"/>`)
+    block.forEach((line, i) => {
+      parts.push(`<text ${i === 0 ? 'class="ink" ' : ''}x="${PAD + 14}" y="${y + i * lineHeight}">${esc(line)}</text>`)
+    })
+    y += block.length * lineHeight + 7
+  }
+  if (lines.length === 0) parts.push(`<text class="dim" x="${PAD}" y="${top}">Nothing in this range.</text>`)
+  return close(parts)
 }
