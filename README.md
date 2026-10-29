@@ -35,7 +35,7 @@ TacosPlugins/
 │       ├── .claude-plugin/plugin.json
 │       ├── hooks/, commands/, bin/
 │       └── lib/                      # vendored copy of packages/core (tracked in git)
-└── scripts/release.mjs               # copies packages/core into every plugin's lib/
+└── scripts/release.mjs               # copies packages/core into each plugin that uses it
 ```
 
 ## Development
@@ -53,8 +53,10 @@ npm test
 Each plugin ships as a self-contained directory — Claude Code does not run
 `npm install` for a plugin, and a plugin cannot import from a sibling
 `packages/core/` at runtime. So the shared code lives once, in
-`packages/core/`, and `scripts/release.mjs` copies it into every plugin's
-`lib/` directory before release.
+`packages/core/`, and `scripts/release.mjs` copies it into the `lib/`
+directory of every plugin that uses it before release. A plugin that imports
+nothing from `packages/core/` is named in `STANDALONE_PLUGINS` there and
+carries no `lib/`.
 
 **`plugins/*/lib/` is generated but tracked in git, not gitignored** — a
 plugin installs as a self-contained directory with no build step, so the

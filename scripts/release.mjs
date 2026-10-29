@@ -3,6 +3,16 @@ import { readdirSync, mkdirSync, copyFileSync, statSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+/** Plugins that import nothing from packages/core, and so carry no vendored lib/. */
+export const STANDALONE_PLUGINS = ['board']
+
+/** The plugins under pluginsDir that packages/core is vendored into. */
+export function vendoredPlugins(pluginsDir) {
+  return readdirSync(pluginsDir)
+    .filter((name) => statSync(join(pluginsDir, name)).isDirectory())
+    .filter((name) => !STANDALONE_PLUGINS.includes(name))
+}
+
 /** Copies every top-level .mjs from coreDir into targetLibDir, pruning any .mjs
  *  in targetLibDir that no longer has a source in coreDir. Returns copied filenames. */
 export function vendorCore(coreDir, targetLibDir) {
@@ -27,7 +37,7 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain) {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
   const core = join(root, 'packages', 'core')
-  for (const plugin of readdirSync(join(root, 'plugins'))) {
+  for (const plugin of vendoredPlugins(join(root, 'plugins'))) {
     const lib = join(root, 'plugins', plugin, 'lib')
     const copied = vendorCore(core, lib)
     console.log(`vendored ${copied.length} modules into plugins/${plugin}/lib/`)
