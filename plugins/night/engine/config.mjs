@@ -99,7 +99,7 @@ export const DEFAULTS = Object.freeze({
   health: {
     swapBlockPct: 95, psiFullAvg60: 5, diskWarnGb: 8, diskBlockGb: 3, tmpBlockPct: 75, cpuHotC: 85, gpuHotC: 100,
   },
-  artifact: { url: null, title: 'Night recap' },
+  artifact: { url: null, title: 'Night recap', publish: true },
 })
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)

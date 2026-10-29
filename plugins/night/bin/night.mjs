@@ -69,7 +69,7 @@ async function makeRecap(paths, m, { publish = false } = {}) {
     mkdirSync(dir, { recursive: true })
     copyFileSync(files.recapHtml, join(dir, 'recap.html'))
   }
-  if (publish) await publishRecap(paths, files, config)
+  if (publish && config.artifact.publish) await publishRecap(paths, files, config)
   return recap
 }
 
