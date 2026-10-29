@@ -3,7 +3,7 @@
 // other than the night's own.
 import { spawnSync } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /** Runs git and returns stdout; throws with git's message on failure. */
 export function runGit(args, { cwd, timeoutMs = 60_000 } = {}) {
@@ -98,9 +98,29 @@ export function branchExists(repo, branch, { run = runGit } = {}) {
  */
 export function ensureWorktree(repo, path, branch, base, { run = runGit } = {}) {
   if (existsSync(path) && currentBranch(path, { run }) === branch) return path
+  if (existsSync(join(path, '.git'))) return reattach(path, branch, { run })
   tryGit(run, ['worktree', 'prune'], { cwd: repo })
   if (branchExists(repo, branch, { run })) run(['worktree', 'add', '--force', path, branch], { cwd: repo })
   else run(['worktree', 'add', '-b', branch, path, base], { cwd: repo })
+  return path
+}
+
+/**
+ * Puts a worktree a worker left detached, mid-rebase or on another branch back on
+ * its night branch, keeping its work: an unfinished operation is aborted, leftovers
+ * are committed where HEAD is, and a HEAD that only moved ahead of the branch takes
+ * the branch with it. Anything else is recorded by the caller from the returned sha.
+ */
+export function reattach(path, branch, { run = runGit } = {}) {
+  for (const op of [['rebase', '--abort'], ['merge', '--abort'], ['cherry-pick', '--abort'], ['am', '--abort']]) tryGit(run, op, { cwd: path })
+  if (dirtyPaths(path, { run }).length) {
+    tryGit(run, ['add', '-A'], { cwd: path })
+    tryGit(run, ['commit', '-q', '-m', 'night: work left on a detached head'], { cwd: path })
+  }
+  const head = tryGit(run, ['rev-parse', 'HEAD'], { cwd: path })?.trim()
+  const ahead = head && tryGit(run, ['merge-base', '--is-ancestor', branch, head], { cwd: path }) !== null
+  if (ahead) run(['checkout', '-q', '-B', branch, head], { cwd: path })
+  else run(['checkout', '-q', branch], { cwd: path })
   return path
 }
 

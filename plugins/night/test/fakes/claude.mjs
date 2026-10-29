@@ -11,6 +11,7 @@ const session = flag('--session-id') ?? flag('--resume')
 const say = (line) => process.stdout.write(`${JSON.stringify({ session_id: session, ...line })}\n`)
 const mode = process.env.FAKE_MODE ?? 'done'
 
+if (mode === 'crash-silent') process.exit(1)
 say({ type: 'system', subtype: 'init' })
 if (mode === 'done' || mode === 'partial' || mode === 'needs-owner') {
   writeFileSync('work.txt', `${Date.now()}\n`)

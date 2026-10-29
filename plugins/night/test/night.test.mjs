@@ -216,3 +216,35 @@ test('Stop from the pane marks the night stopped at once and leaves the slow par
   assert.equal(readCurrent(s.paths).stopping, false)
   assert.ok(has(s.calls, 'stop', 'night.target'))
 })
+
+test('a dawn timer and a keeper that both see the window end run dawn once between them', async (t) => {
+  const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
+  await armAndRun(s)
+  s.set(Date.parse('2026-03-11T05:31:00Z'))
+  const fast = s.m.run
+  s.m.run = async (argv) => { await new Promise((r) => setTimeout(r, 150)); return fast(argv) }
+  s.calls.length = 0
+  let recaps = 0
+  const recap = async () => { recaps++ }
+  await Promise.all([dawn(s.paths, s.m, { recap }), keep(s.paths, s.m, { guard: s.guardOk, recap })])
+  assert.equal(s.calls.filter((c) => c.includes('kscreen-doctor')).length, 1)
+  assert.equal(recaps, 1)
+  assert.equal(readCurrent(s.paths).phase, 'day')
+})
+
+test('a Stop that lands during dusk keeps the later steps and the services from starting', async (t) => {
+  const s = fakeMachine(t)
+  await arm(s.paths, s.m)
+  s.set(Date.parse('2026-03-10T22:30:05Z'))
+  const fast = s.m.run
+  s.m.run = async (argv) => {
+    if (argv[0] === 'qdbus-qt6') throw new Error('screens must not go off after Stop')
+    // The owner presses Stop while the power step runs.
+    if (argv.includes('night-power.service')) writeCurrent(s.paths, { ...readCurrent(s.paths), phase: 'stopped' })
+    return fast(argv)
+  }
+  await dusk(s.paths, s.m, { node: process.execPath, guard: s.guardOk })
+  assert.equal(readCurrent(s.paths).phase, 'stopped')
+  assert.ok(!has(s.calls, 'start', 'night.target'))
+  assert.ok(!has(s.calls, 'run', 'qdbus-qt6'))
+})

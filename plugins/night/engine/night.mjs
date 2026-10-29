@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 
 import { calendarUtc, localDate, nextAt, planNight, systemTimeZone } from './clock.mjs'
 import { loadConfig, nightFiles } from './config.mjs'
-import { readJson, readJsonl, writeJson, writeText } from './fsx.mjs'
+import { readJson, readJsonl, withLock, writeJson, writeText } from './fsx.mjs'
 import { baseBranch, commitsSince, dirtyPaths, runGit } from './git.mjs'
 import { counts, progressOf, readQueue, releaseSlot, withQueue } from './queue.mjs'
 import { chooseProjects, findProjects, parseRoadmapRows, readNotes } from './sources.mjs'
@@ -20,6 +20,15 @@ import * as rgb from './hardware/rgb.mjs'
 import * as screens from './hardware/screens.mjs'
 
 export const WATCHERS = ['conductor', 'health', 'logs', 'usage', 'medic']
+
+/**
+ * Dusk, dawn, Stop and the keeper never overlap: a dawn timer and a keeper that both
+ * see the window end must not run the RGB script and the publisher twice. A run that
+ * finds the lock taken waits (dusk, dawn, Stop) or skips this turn (the keeper).
+ */
+async function lifecycle(paths, fn, { waitMs = 25 * 60_000 } = {}) {
+  return withLock(join(paths.root, 'lifecycle.lock'), fn, { timeoutMs: waitMs, staleMs: 30 * 60_000 })
+}
 
 /** The effects night needs from the machine; tests replace them. */
 export function machine({ env = process.env } = {}) {
@@ -109,6 +118,8 @@ async function runSteps(paths, which, steps, ctx, m, { only } = {}) {
   const files = nightFiles(paths, readCurrent(paths).date)
   for (const [name, step] of steps) {
     if (only && !only.includes(name)) continue
+    // A Stop that lands during dusk wins: no later dusk step runs.
+    if (which === 'dusk' && readCurrent(paths).phase === 'stopped') break
     let result
     try {
       result = await step(ctx)
@@ -204,7 +215,11 @@ export async function disarm(paths, m) {
 }
 
 /** At "from": the walls are checked, the machine goes dark and quiet, the night's services start. */
-export async function dusk(paths, m, { node = process.execPath, guard } = {}) {
+export async function dusk(paths, m, options = {}) {
+  return lifecycle(paths, () => duskNow(paths, m, options))
+}
+
+async function duskNow(paths, m, { node = process.execPath, guard } = {}) {
   const current = readCurrent(paths)
   const now = m.now()
   if (!['armed', 'dusk'].includes(current.phase)) return current
@@ -224,16 +239,22 @@ export async function dusk(paths, m, { node = process.execPath, guard } = {}) {
     await m.notify(`Night mode did not start workers: ${problems.join('; ')}`)
   }
   await runSteps(paths, 'dusk', DUSK_STEPS, hardwareCtx(paths, config, m), m)
+  if (readCurrent(paths).phase !== 'dusk') return readCurrent(paths)
   await m.systemctl('start', 'night.target')
   return updateCurrent(paths, (c) => ({ ...c, phase: c.phase === 'dusk' ? 'night' : c.phase }))
 }
 
 /** At "to": the machine comes back and the recap is written. Workers go on until Stop. */
-export async function dawn(paths, m, { recap, force = false } = {}) {
+export async function dawn(paths, m, options = {}) {
+  return lifecycle(paths, () => dawnNow(paths, m, options))
+}
+
+async function dawnNow(paths, m, { recap, force = false } = {}) {
   const current = readCurrent(paths)
   if (!current.date || current.phase === 'idle' || current.phase === 'armed') return current
   // Once is enough: a timer that fires again must not switch the lights on or publish twice.
-  if (current.dawnAt && !force) return current
+  if ((current.dawnAt || current.dawnStartedAt) && !force) return current
+  updateCurrent(paths, (c) => ({ ...c, dawnStartedAt: m.now() }))
   const { config } = loadConfig(paths)
   await runSteps(paths, 'dawn', DAWN_STEPS, hardwareCtx(paths, config, m), m)
   const next = updateCurrent(paths, (c) => ({ ...c, phase: c.phase === 'stopped' ? 'stopped' : 'day', dawnAt: c.dawnAt ?? m.now() }))
@@ -254,7 +275,11 @@ export async function requestStop(paths, m) {
 }
 
 /** Stop: nothing restarts any more, workers end and commit what they left, the machine is restored. */
-export async function stop(paths, m, { recap } = {}) {
+export async function stop(paths, m, options = {}) {
+  return lifecycle(paths, () => stopNow(paths, m, options))
+}
+
+async function stopNow(paths, m, { recap } = {}) {
   const current = readCurrent(paths)
   if (!current.date) return current
   const wasDawn = Boolean(current.dawnAt)
@@ -301,22 +326,37 @@ export function removeCleanWorktrees(paths, date, { run = runGit } = {}) {
  * a process was killed, and starts night.target if it should run.
  */
 export async function keep(paths, m, hooks = {}) {
+  try {
+    return await lifecycle(paths, () => keepNow(paths, m, hooks), { waitMs: 0 })
+  } catch (err) {
+    if (/lock busy/.test(String(err?.message))) return readCurrent(paths) // dusk, dawn or Stop is running: next turn
+    throw err
+  }
+}
+
+async function keepNow(paths, m, hooks = {}) {
   const current = readCurrent(paths)
   const now = m.now()
   if (current.phase === 'armed') {
-    if (now >= current.start && now < current.end) return dusk(paths, m, hooks)
+    if (now >= current.start && now < current.end) return duskNow(paths, m, hooks)
     if (now >= current.end) return writeCurrent(paths, { ...current, phase: 'idle', missedAt: now })
     await writeTimers(paths, current, m)
     return current
   }
   if (!RUNNING.has(current.phase)) return current
-  if (current.phase === 'dusk' && now - (current.duskAt ?? now) > 15 * 60_000) await dusk(paths, m, hooks)
-  if (current.phase !== 'day' && now >= current.end) return dawn(paths, m, hooks)
+  if (current.phase === 'dusk' && now - (current.duskAt ?? now) > 15 * 60_000) await duskNow(paths, m, hooks)
+  if (current.phase !== 'day' && now >= current.end) return dawnNow(paths, m, hooks)
   if (current.phase !== 'day') await writeTimers(paths, current, m)
   await m.systemctl('start', 'night.target')
   const files = nightFiles(paths, current.date)
   const { config } = loadConfig(paths)
   for (let slot = config.sessions + 1; slot <= 4; slot++) await m.systemctl('stop', `night-worker@${slot}.service`)
+  // A slot above the session count gives back whatever it held, so its project is free for the others.
+  await withQueue(paths, current.date, (q) => {
+    let next = q
+    for (let slot = config.sessions + 1; slot <= 4; slot++) next = releaseSlot(next, slot, now)
+    return { queue: next }
+  })
   const late = staleBeats(readBeats(files), ['medic'], now, 5 * 60_000)
   if (late.length) {
     addEvent(files, 'watcher.restart', { name: 'medic', by: 'keeper' }, now)

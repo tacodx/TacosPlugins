@@ -180,7 +180,6 @@ export async function workerTurn(slot, { paths, deps }) {
     await withQueue(paths, current.date, (q) => ({ queue: settle(q, item.id, { outcome: 'crash', line: 'could not make the worktree', now }) }))
     return idle('error', 60_000)
   }
-  writeJson(place.settings, workerSettings({ node: deps.node, guard: deps.guard }))
 
   const sameSession = ws.sessionId && ws.sessionProject === item.project && (ws.itemsInSession ?? 0) < config.worker.itemsPerSession
   const continuing = sameSession && ws.itemId === item.id ? ws.interrupted ?? 'a restart' : null
@@ -197,13 +196,14 @@ export async function workerTurn(slot, { paths, deps }) {
     decisions: place.decisions,
     secrets: (config.worker.secrets ?? []).map((d) => d.replace(/^~(?=\/)/, paths.home)),
   })
+  writeJson(place.settings, workerSettings({ node: deps.node, guard: deps.guard, env }))
   const addDirs = [place.scratch, ...(config.worker.cacheDirs ?? []).map((d) => d.replace(/^~(?=\/)/, paths.home))]
   const args = workerArgs({
     prompt, sessionId, resume, model: config.models.worker, settingsPath: place.settings, addDirs, name: `Night ${slot} · ${item.project}`,
   })
   save({
     state: 'working', project: item.project, itemId: item.id, itemTitle: item.title, sessionId, sessionProject: item.project,
-    sessionStarted: true, since: now, interrupted: 'a restart',
+    sessionStarted: resume, since: now, interrupted: 'a restart',
     // A new session starts its count again; a stale count from another project must not block a resume.
     itemsInSession: sameSession ? ws.itemsInSession ?? 0 : 0,
   })
@@ -212,6 +212,7 @@ export async function workerTurn(slot, { paths, deps }) {
   const silentMs = config.worker.silentMinutes * 60_000
   const beatTimer = setInterval(() => beat(files, `worker-${slot}`, { state: 'working', item: item.id }), 30_000)
   beat(files, `worker-${slot}`, { state: 'working', item: item.id }, now)
+  let started = resume
   const run = await deps.runClaude({
     claude: typeof deps.claude === 'function' ? deps.claude() : deps.claude,
     args,
@@ -219,6 +220,12 @@ export async function workerTurn(slot, { paths, deps }) {
     env,
     streamPath: wp.stream,
     onSpawn: (pid) => save({ childPid: pid }),
+    // The session exists once Claude has said its id; only then can a later run resume it.
+    onLine: (line) => {
+      if (started || !line?.session_id) return
+      started = true
+      save({ sessionStarted: true })
+    },
     watch: ({ lastOutput }) => {
       if (isPaused(files, slot)) return 'paused'
       if (!RUNNING.has(readCurrent(paths).phase)) return 'stop'
@@ -268,6 +275,12 @@ export async function workerTurn(slot, { paths, deps }) {
       itemsInSession: (readJson(wp.state, {})?.itemsInSession ?? 0) + 1, backoffStep: 0, interrupted: null,
     })
     return { wait: 2_000, state: 'done' }
+  }
+  if (resume && /no conversation found|session .* not found/i.test(`${outcome.text} ${run.stderr ?? ''}`)) {
+    save({ state: 'retrying', sessionId: null, sessionProject: null, sessionStarted: false, interrupted: null })
+    await withQueue(paths, current.date, (q) => ({ queue: releaseSlot(q, slot, end) }))
+    addEvent(files, 'worker.session-lost', { slot, item: item.id, sessionId }, end)
+    return { wait: 2_000, state: 'retry' }
   }
   // Ended without a result line, crashed, went silent or was killed from outside.
   const why = run.stopping === 'silent' ? 'silent too long' : outcome.stop === 'result' ? 'no result line' : `exit ${run.exitCode ?? run.signal}`

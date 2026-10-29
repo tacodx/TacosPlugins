@@ -9,6 +9,7 @@ import { nightFiles } from './config.mjs'
 import { readJson, withLock, writeJson, writeText } from './fsx.mjs'
 
 export const MAX_ATTEMPTS = 3
+export const MAX_PARTIALS = 5
 
 export function emptyQueue(date) {
   return { version: 1, date, items: [], maps: {}, planned: {}, exhausted: {} }
@@ -138,7 +139,11 @@ export function settle(queue, id, { outcome, line = '', sessionId = null, now, c
     return next
   }
   if (outcome === 'needs-owner') return replace(queue, id, { ...base, status: 'parked' })
-  if (outcome === 'partial') return replace(queue, id, { ...base, status: 'open', partial: true })
+  if (outcome === 'partial') {
+    // A run that ends without finishing goes back, but not forever: five partials park it.
+    const partials = (item.partials ?? 0) + 1
+    return replace(queue, id, { ...base, status: partials >= MAX_PARTIALS ? 'failed' : 'open', partial: true, partials })
+  }
   const attempts = item.attempts + (countAttempt ? 1 : 0)
   return replace(queue, id, { ...base, attempts, status: attempts >= MAX_ATTEMPTS ? 'failed' : 'open' })
 }

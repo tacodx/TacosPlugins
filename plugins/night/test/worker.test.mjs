@@ -67,7 +67,7 @@ test('a worker takes an item, works in a night worktree, and the item ends done 
   const call = s.calls()[0]
   assert.match(call.cwd, /\.local\/share\/night\/worktrees\/2026-03-10\/alpha$/)
   assert.equal(call.env.NIGHT_WORKER, '1')
-  assert.equal(call.env.GIT_CONFIG_COUNT, '5')
+  assert.equal(call.env.GIT_CONFIG_COUNT, '6')
   assert.ok(call.args.includes('--session-id'))
   assert.equal(call.args[call.args.indexOf('--setting-sources') + 1], 'project,local')
   const branch = execFileSync('git', ['log', '-1', '--format=%s', 'night/2026-03-10/alpha'], { cwd: s.repo, encoding: 'utf8' })
@@ -179,4 +179,14 @@ test('a Claude killed on the first item of a new project resumes that session, w
   assert.notEqual(id, 'old-session')
   assert.equal(second.args[second.args.indexOf('--resume') + 1], id)
   assert.match(second.args[1], /Continue the item/)
+})
+
+test('a run that dies before Claude names its session is not resumed: the next run starts a session of its own', async (t) => {
+  const s = setup(t, { mode: 'crash-silent' })
+  await workerTurn(1, { paths: s.paths, deps: s.deps })
+  s.deps.env.FAKE_MODE = 'done'
+  await workerTurn(1, { paths: s.paths, deps: s.deps })
+  const [, second] = s.calls()
+  assert.ok(second.args.includes('--session-id'))
+  assert.ok(!second.args.includes('--resume'))
 })

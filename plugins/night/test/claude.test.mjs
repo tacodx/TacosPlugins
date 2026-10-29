@@ -29,7 +29,10 @@ test('the worker environment blocks pushes in git, drops the display and points 
   assert.equal(env.DISPLAY, undefined)
   assert.equal(env.WAYLAND_DISPLAY, undefined)
   assert.equal(env.GIT_CONFIG_KEY_8, undefined)
-  assert.equal(env.GIT_CONFIG_COUNT, '5')
+  assert.equal(env.GIT_CONFIG_COUNT, '6')
+  assert.equal(env.GIT_CONFIG_KEY_5, 'credential.helper')
+  assert.equal(env.GIT_CONFIG_VALUE_5, '')
+  assert.equal(env.GIT_SSH_COMMAND, 'false')
   assert.equal(env.GIT_CONFIG_KEY_0, 'url.night-blocked:.pushInsteadOf')
   assert.equal(env.GIT_CONFIG_VALUE_2, 'git@')
   assert.equal(env.GH_TOKEN, 'night-blocked')
@@ -57,4 +60,18 @@ test('an item prompt names the branch, the why and the done-when; a continuation
 
 test('back-off grows from one to fifteen minutes and stays there', () => {
   assert.deepEqual([0, 1, 2, 7].map(backoffMs), [60_000, 300_000, 900_000, 900_000])
+})
+
+test('a successful result that mentions a usage limit is still a result', () => {
+  const run = readRun([result('Done. NIGHT-RESULT: done · noted that the usage limit page needs copy')])
+  assert.equal(run.stop, 'result')
+  assert.equal(run.parsed.outcome, 'done')
+})
+
+test('the worker settings outrank a project\'s own: hooks stay on and the push block rides along', async () => {
+  const { workerSettings } = await import('../engine/claude.mjs')
+  const settings = workerSettings({ node: '/n', guard: '/g', env: { GIT_CONFIG_COUNT: '6', GIT_CONFIG_KEY_0: 'x', GH_TOKEN: 'night-blocked', HOME: '/h' } })
+  assert.equal(settings.disableAllHooks, false)
+  assert.deepEqual(Object.keys(settings.env).sort(), ['GH_TOKEN', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0'])
+  assert.equal(settings.hooks.PreToolUse[0].hooks[0].timeout, 120)
 })

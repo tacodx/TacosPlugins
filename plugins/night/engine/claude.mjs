@@ -17,18 +17,30 @@ export const WORKER_RULES = `You are a night worker. The owner of this project i
 - When the item is done, or you cannot go further, end your final message with exactly one line:
 NIGHT-RESULT: done|partial|needs-owner · <one plain sentence on what you did, or what the owner must decide>`
 
-/** The settings file every worker runs with: the sandbox, the guard hook, no attribution. */
-export function workerSettings({ node, guard }) {
+/**
+ * The settings file every worker runs with: the sandbox, the guard hook, no
+ * attribution. Given with --settings, it outranks a project's own settings, so a
+ * worker that writes .claude/settings.local.json cannot switch the hook off or
+ * change the push block. The hook gets two minutes: under memory pressure even
+ * starting node can be slow, and a hook that times out must not let a call through.
+ */
+export function workerSettings({ node, guard, env = {} }) {
   return {
     includeCoAuthoredBy: false,
+    disableAllHooks: false,
     sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
+    env: pick(env, (key) => key.startsWith('GIT_CONFIG_') || ['GH_TOKEN', 'GIT_SSH_COMMAND', 'GIT_TERMINAL_PROMPT'].includes(key)),
     hooks: {
-      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${node}" "${guard}" || exit 2`, timeout: 20 }] }],
+      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${node}" "${guard}" || exit 2`, timeout: 120 }] }],
     },
   }
 }
 
+const pick = (env, keep) => Object.fromEntries(Object.entries(env).filter(([key]) => keep(key)))
+
 const PUSH_BLOCK = ['https://', 'http://', 'git@', 'ssh://', 'git://']
+// After the push rewrites: an empty credential.helper clears every helper, so https has no credentials either.
+const EXTRA_CONFIG = [['credential.helper', '']]
 
 /** The environment of a worker's Claude session. */
 export function workerEnv(base, { slot, worktree, scratch, protectedBranches, testLock, events, decisions, secrets = [] }) {
@@ -56,15 +68,20 @@ export function workerEnv(base, { slot, worktree, scratch, protectedBranches, te
     GIT_PAGER: 'cat',
     GIT_TERMINAL_PROMPT: '0',
     SSH_ASKPASS_REQUIRE: 'never',
-    GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
+    // No ssh at all: a remote with its own pushurl ignores pushInsteadOf, and a key without a passphrase would push.
+    GIT_SSH_COMMAND: 'false',
     BROWSER: 'true',
     npm_config_yes: 'true',
     GH_TOKEN: 'night-blocked',
-    GIT_CONFIG_COUNT: String(PUSH_BLOCK.length),
+    GIT_CONFIG_COUNT: String(PUSH_BLOCK.length + EXTRA_CONFIG.length),
   })
   PUSH_BLOCK.forEach((prefix, i) => {
     env[`GIT_CONFIG_KEY_${i}`] = 'url.night-blocked:.pushInsteadOf'
     env[`GIT_CONFIG_VALUE_${i}`] = prefix
+  })
+  EXTRA_CONFIG.forEach(([key, value], j) => {
+    env[`GIT_CONFIG_KEY_${PUSH_BLOCK.length + j}`] = key
+    env[`GIT_CONFIG_VALUE_${PUSH_BLOCK.length + j}`] = value
   })
   return env
 }
@@ -136,8 +153,9 @@ export function readRun(lines, { exitCode, signal } = {}) {
   const parsed = parseResultLine(finalText) ?? parseResultLine(texts.join('\n'))
   const said = `${finalText} ${result?.subtype ?? ''}`
   let stop = 'crash'
-  if (limit || /hit your (session |weekly )?limit|usage limit|rate_limit/i.test(said)) stop = 'limit'
-  else if (result && !result.is_error) stop = 'result'
+  // A successful result wins: its text may well mention a usage limit in passing.
+  if (result && !result.is_error && !limit) stop = 'result'
+  else if (limit || /hit your (session |weekly )?limit|usage limit|rate_limit/i.test(said)) stop = 'limit'
   else if (LOGIN.test(said)) stop = 'login'
   else if (TRANSIENT.test(said)) stop = 'transient'
   else if (result?.is_error && result?.subtype === 'error_max_turns') stop = 'result'

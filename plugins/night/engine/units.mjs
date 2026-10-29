@@ -108,7 +108,7 @@ export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv
     Unit: ['Description=Night worker %i', 'PartOf=night.target', never],
     Service: [
       'Type=simple', night('worker', '%i'), 'Restart=always', 'RestartSec=10', 'Slice=night.slice',
-      `MemoryHigh=${memoryHigh}`, `MemoryMax=${memoryMax}`, 'MemorySwapMax=0', 'KillMode=control-group', 'TimeoutStopSec=60', 'Nice=5',
+      `MemoryHigh=${memoryHigh}`, `MemoryMax=${memoryMax}`, 'MemorySwapMax=0', 'OOMPolicy=continue', 'KillMode=control-group', 'TimeoutStopSec=60', 'Nice=5',
       'WorkingDirectory=%h', ...environment,
     ],
   })
