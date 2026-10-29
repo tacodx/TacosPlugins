@@ -1,0 +1,766 @@
+{
+  "date": "2026-10-29",
+  "zone": "Europe/Berlin",
+  "window": {
+    "start": "2026-10-29T21:30:00Z",
+    "end": "2026-10-30T06:00:00Z"
+  },
+  "now": "2026-10-30T06:02:00Z",
+  "phase": "day",
+  "commits": [
+    {
+      "project": "pixel-forge",
+      "hash": "ee9447f",
+      "at": "2026-10-29T21:33:21.408Z",
+      "subject": "Test the PNG export at 2x",
+      "added": 142,
+      "removed": 3,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "4c9c9df",
+      "at": "2026-10-29T21:35:49.401Z",
+      "subject": "Pricing table: align the plan columns",
+      "added": 143,
+      "removed": 30,
+      "branch": "feature/pricing-page"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "126e2a6",
+      "at": "2026-10-29T22:01:48.912Z",
+      "subject": "Test the contact form error states",
+      "added": 134,
+      "removed": 36,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "317fb07",
+      "at": "2026-10-29T22:12:34.681Z",
+      "subject": "Pricing table: dark mode for the cards",
+      "added": 13,
+      "removed": 17,
+      "branch": "feature/pricing-page"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "a1afdff",
+      "at": "2026-10-29T22:23:36.659Z",
+      "subject": "Keep the filter when the page reloads",
+      "added": 37,
+      "removed": 8,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "deb157f",
+      "at": "2026-10-29T22:31:45.130Z",
+      "subject": "Pricing table: yearly toggle",
+      "added": 15,
+      "removed": 44,
+      "branch": "feature/pricing-page"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "a6773df",
+      "at": "2026-10-29T22:35:04.391Z",
+      "subject": "Undo now restores the layer order",
+      "added": 90,
+      "removed": 34,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "0017abf",
+      "at": "2026-10-29T22:37:02.401Z",
+      "subject": "Add tests for the month boundary",
+      "added": 113,
+      "removed": 34,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "dfcb15f",
+      "at": "2026-10-29T22:53:55.023Z",
+      "subject": "Explain the --since flag in the help text",
+      "added": 39,
+      "removed": 15,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "22e0447",
+      "at": "2026-10-29T23:02:57.591Z",
+      "subject": "Add a test for an empty tide table",
+      "added": 119,
+      "removed": 10,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "5dfe03f",
+      "at": "2026-10-29T23:25:55.537Z",
+      "subject": "Show an empty state when there are no entries",
+      "added": 40,
+      "removed": 13,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "0d25cbf",
+      "at": "2026-10-29T23:35:08.035Z",
+      "subject": "Stop the canvas jumping on resize",
+      "added": 71,
+      "removed": 19,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "bd2133f",
+      "at": "2026-10-29T23:42:59.357Z",
+      "subject": "Compress the hero image",
+      "added": 119,
+      "removed": 37,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "104f7df",
+      "at": "2026-10-29T23:44:28.405Z",
+      "subject": "Tighten heading spacing on small screens",
+      "added": 74,
+      "removed": 9,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "c17da9f",
+      "at": "2026-10-29T23:49:32.251Z",
+      "subject": "Undo now restores the layer order",
+      "added": 130,
+      "removed": 14,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "4861d3f",
+      "at": "2026-10-29T23:50:36.553Z",
+      "subject": "Show an empty state when there are no entries",
+      "added": 13,
+      "removed": 39,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "11a449f",
+      "at": "2026-10-29T23:53:32.348Z",
+      "subject": "Compress the hero image",
+      "added": 25,
+      "removed": 1,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "380d887",
+      "at": "2026-10-30T00:05:50.287Z",
+      "subject": "Undo now restores the layer order",
+      "added": 111,
+      "removed": 34,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "4ca63ff",
+      "at": "2026-10-30T00:22:59.079Z",
+      "subject": "Compress the hero image",
+      "added": 48,
+      "removed": 39,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "4912a5f",
+      "at": "2026-10-30T00:33:08.817Z",
+      "subject": "Explain the --since flag in the help text",
+      "added": 89,
+      "removed": 28,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "03437df",
+      "at": "2026-10-30T00:34:41.515Z",
+      "subject": "Test the PNG export at 2x",
+      "added": 119,
+      "removed": 19,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "72d061f",
+      "at": "2026-10-30T00:41:13.615Z",
+      "subject": "Round totals once, at the end of a sum",
+      "added": 120,
+      "removed": 12,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "094443f",
+      "at": "2026-10-30T00:44:33.025Z",
+      "subject": "Lazy-load work page images with sizes",
+      "added": 26,
+      "removed": 29,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "3862767",
+      "at": "2026-10-30T01:10:59.436Z",
+      "subject": "Undo now restores the layer order",
+      "added": 88,
+      "removed": 26,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "7483607",
+      "at": "2026-10-30T01:13:17.113Z",
+      "subject": "Keep the filter when the page reloads",
+      "added": 55,
+      "removed": 0,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "33581ff",
+      "at": "2026-10-30T01:33:29.111Z",
+      "subject": "Add alt text to the team photos",
+      "added": 85,
+      "removed": 18,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "d71badf",
+      "at": "2026-10-30T03:17:54.010Z",
+      "subject": "Tighten heading spacing on small screens",
+      "added": 54,
+      "removed": 32,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "a87033f",
+      "at": "2026-10-30T03:18:41.189Z",
+      "subject": "Undo now restores the layer order",
+      "added": 124,
+      "removed": 4,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "1bbc42f",
+      "at": "2026-10-30T03:25:16.061Z",
+      "subject": "Fix the CSV export header order",
+      "added": 43,
+      "removed": 25,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "664355f",
+      "at": "2026-10-30T03:35:12.728Z",
+      "subject": "Tighten heading spacing on small screens",
+      "added": 38,
+      "removed": 3,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "e96d93f",
+      "at": "2026-10-30T03:55:02.134Z",
+      "subject": "Explain the --since flag in the help text",
+      "added": 100,
+      "removed": 5,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "7ed4f07",
+      "at": "2026-10-30T04:13:36.328Z",
+      "subject": "Add tests for the month boundary",
+      "added": 115,
+      "removed": 22,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "adbb2bf",
+      "at": "2026-10-30T04:26:14.477Z",
+      "subject": "Undo now restores the layer order",
+      "added": 13,
+      "removed": 0,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "866ac7f",
+      "at": "2026-10-30T04:35:28.624Z",
+      "subject": "Add alt text to the team photos",
+      "added": 46,
+      "removed": 20,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "e6134ff",
+      "at": "2026-10-30T04:35:34.461Z",
+      "subject": "Keep the filter when the page reloads",
+      "added": 141,
+      "removed": 11,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "559e59f",
+      "at": "2026-10-30T04:49:24.074Z",
+      "subject": "Exit 2 on an unknown flag",
+      "added": 102,
+      "removed": 4,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "23cf9ff",
+      "at": "2026-10-30T04:59:24.511Z",
+      "subject": "Add keyboard shortcuts to the toolbar",
+      "added": 17,
+      "removed": 31,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "c56c887",
+      "at": "2026-10-30T05:04:46.731Z",
+      "subject": "Point footer links at the new legal pages",
+      "added": 21,
+      "removed": 38,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "7e2ed7f",
+      "at": "2026-10-30T05:07:13.017Z",
+      "subject": "Undo now restores the layer order",
+      "added": 143,
+      "removed": 14,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "pixel-forge",
+      "hash": "366a507",
+      "at": "2026-10-30T05:09:09.958Z",
+      "subject": "Add keyboard shortcuts to the toolbar",
+      "added": 70,
+      "removed": 23,
+      "branch": "night/2026-10-29/pixel-forge"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "e37e6df",
+      "at": "2026-10-30T05:35:03.526Z",
+      "subject": "Show an empty state when there are no entries",
+      "added": 52,
+      "removed": 33,
+      "branch": "night/2026-10-29/ledger-app"
+    },
+    {
+      "project": "harbor-site",
+      "hash": "9e18fff",
+      "at": "2026-10-30T05:36:13.926Z",
+      "subject": "Fix focus ring on the menu button",
+      "added": 39,
+      "removed": 21,
+      "branch": "night/2026-10-29/harbor-site"
+    },
+    {
+      "project": "tide-cli",
+      "hash": "5aed87f",
+      "at": "2026-10-30T05:50:40.932Z",
+      "subject": "Exit 2 on an unknown flag",
+      "added": 90,
+      "removed": 21,
+      "branch": "night/2026-10-29/tide-cli"
+    },
+    {
+      "project": "ledger-app",
+      "hash": "c75ca5f",
+      "at": "2026-10-30T05:56:38.379Z",
+      "subject": "Show an empty state when there are no entries",
+      "added": 133,
+      "removed": 17,
+      "branch": "night/2026-10-29/ledger-app"
+    }
+  ],
+  "projects": [
+    {
+      "name": "harbor-site",
+      "duskPct": 40,
+      "nowPct": 58,
+      "doneTasks": 18,
+      "totalTasks": 31,
+      "addedTasks": 2,
+      "itemsDone": 3,
+      "itemsParked": 1,
+      "branch": "night/2026-10-29/harbor-site",
+      "left": [
+        "Dark mode for the pricing table",
+        "Cookie notice without a banner",
+        "Image sizes on the blog",
+        "Print styles for invoices",
+        "Sitemap for the new pages"
+      ]
+    },
+    {
+      "name": "ledger-app",
+      "duskPct": 62.5,
+      "nowPct": 71.4,
+      "doneTasks": 25,
+      "totalTasks": 35,
+      "addedTasks": 0,
+      "itemsDone": 3,
+      "itemsParked": 0,
+      "branch": "night/2026-10-29/ledger-app",
+      "left": [
+        "Recurring entries",
+        "Import from a bank CSV",
+        "Budget per category"
+      ]
+    },
+    {
+      "name": "tide-cli",
+      "duskPct": null,
+      "nowPct": null,
+      "doneTasks": 0,
+      "totalTasks": 0,
+      "addedTasks": 0,
+      "itemsDone": 2,
+      "itemsParked": 0,
+      "branch": "night/2026-10-29/tide-cli",
+      "left": []
+    },
+    {
+      "name": "garden-notes",
+      "duskPct": 80,
+      "nowPct": 80,
+      "doneTasks": 16,
+      "totalTasks": 20,
+      "addedTasks": 0,
+      "itemsDone": 0,
+      "itemsParked": 0,
+      "branch": "main",
+      "left": [
+        "Search across notes",
+        "Tag colours",
+        "Export to Markdown",
+        "Weekly digest"
+      ]
+    },
+    {
+      "name": "pixel-forge",
+      "duskPct": 12,
+      "nowPct": 31,
+      "doneTasks": 13,
+      "totalTasks": 42,
+      "addedTasks": 3,
+      "itemsDone": 4,
+      "itemsParked": 1,
+      "branch": "night/2026-10-29/pixel-forge",
+      "left": [
+        "Layer groups",
+        "SVG export",
+        "Snap to grid",
+        "Colour picker history",
+        "Touch gestures"
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "kind": "worker",
+      "name": "Worker 1",
+      "project": "harbor-site",
+      "branch": "night/2026-10-29/harbor-site",
+      "commits": 12,
+      "state": "working",
+      "results": [
+        {
+          "status": "done",
+          "line": "Contact form shows each error beside its field, with tests"
+        },
+        {
+          "status": "done",
+          "line": "Footer links point at the new legal pages"
+        },
+        {
+          "status": "done",
+          "line": "Work page images load lazily with sizes set"
+        },
+        {
+          "status": "partial",
+          "line": "Dark mode for the pricing table: two of five components left"
+        },
+        {
+          "status": "needs-owner",
+          "line": "Which of the two hero headlines to keep"
+        }
+      ]
+    },
+    {
+      "kind": "worker",
+      "name": "Worker 2",
+      "project": "ledger-app",
+      "branch": "night/2026-10-29/ledger-app",
+      "commits": 11,
+      "state": "idle",
+      "results": [
+        {
+          "status": "done",
+          "line": "Totals round once, at the end of a sum"
+        },
+        {
+          "status": "done",
+          "line": "Empty state when there are no entries"
+        },
+        {
+          "status": "done",
+          "line": "Filter survives a reload"
+        }
+      ]
+    },
+    {
+      "kind": "worker",
+      "name": "Worker 3",
+      "project": "pixel-forge",
+      "branch": "night/2026-10-29/pixel-forge",
+      "commits": 12,
+      "state": "limited",
+      "results": [
+        {
+          "status": "done",
+          "line": "Undo restores the layer order"
+        },
+        {
+          "status": "done",
+          "line": "Toolbar keyboard shortcuts"
+        },
+        {
+          "status": "done",
+          "line": "PNG export tested at 2x"
+        },
+        {
+          "status": "done",
+          "line": "Canvas no longer jumps on resize"
+        },
+        {
+          "status": "failed",
+          "line": "Export test needs a licence key the worker does not have"
+        },
+        {
+          "status": "needs-owner",
+          "line": "Licence key for the export test"
+        }
+      ]
+    },
+    {
+      "kind": "worker",
+      "name": "Worker 4",
+      "project": "tide-cli",
+      "branch": "night/2026-10-29/tide-cli",
+      "commits": 6,
+      "state": "idle",
+      "results": [
+        {
+          "status": "done",
+          "line": "Help text explains --since"
+        },
+        {
+          "status": "done",
+          "line": "Unknown flags exit 2"
+        }
+      ]
+    },
+    {
+      "kind": "desktop",
+      "name": "Pricing page polish",
+      "project": "harbor-site",
+      "branch": "feature/pricing-page",
+      "commits": 3,
+      "state": "waiting",
+      "results": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-29T21:30:00Z",
+      "kind": "dusk.step",
+      "step": "lights",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T21:30:01Z",
+      "kind": "dusk.step",
+      "step": "fans",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T21:30:02Z",
+      "kind": "dusk.step",
+      "step": "power",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T21:30:03Z",
+      "kind": "dusk.step",
+      "step": "screens",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T21:30:04Z",
+      "kind": "dusk.step",
+      "step": "units",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T21:30:05Z",
+      "kind": "dusk.step",
+      "step": "canary",
+      "ok": true
+    },
+    {
+      "at": "2026-10-29T22:10:00Z",
+      "kind": "guard.rewrite",
+      "slot": 1
+    },
+    {
+      "at": "2026-10-29T22:14:00Z",
+      "kind": "guard.rewrite",
+      "slot": 2
+    },
+    {
+      "at": "2026-10-29T22:18:00Z",
+      "kind": "guard.rewrite",
+      "slot": 3
+    },
+    {
+      "at": "2026-10-29T22:22:00Z",
+      "kind": "guard.rewrite",
+      "slot": 4
+    },
+    {
+      "at": "2026-10-29T22:26:00Z",
+      "kind": "guard.rewrite",
+      "slot": 1
+    },
+    {
+      "at": "2026-10-29T22:30:00Z",
+      "kind": "guard.rewrite",
+      "slot": 2
+    },
+    {
+      "at": "2026-10-29T22:34:00Z",
+      "kind": "guard.rewrite",
+      "slot": 3
+    },
+    {
+      "at": "2026-10-29T22:38:00Z",
+      "kind": "guard.rewrite",
+      "slot": 4
+    },
+    {
+      "at": "2026-10-29T22:42:00Z",
+      "kind": "guard.rewrite",
+      "slot": 1
+    },
+    {
+      "at": "2026-10-29T23:12:00Z",
+      "kind": "guard.deny",
+      "slot": 1,
+      "what": "git push"
+    },
+    {
+      "at": "2026-10-30T00:41:00Z",
+      "kind": "guard.deny",
+      "slot": 3,
+      "what": "gh pr create"
+    },
+    {
+      "at": "2026-10-30T01:05:00Z",
+      "kind": "worker.restart",
+      "slot": 2
+    },
+    {
+      "at": "2026-10-30T02:02:00Z",
+      "kind": "limit.hit",
+      "limitType": "five_hour"
+    },
+    {
+      "at": "2026-10-30T02:58:00Z",
+      "kind": "limit.reset"
+    },
+    {
+      "at": "2026-10-30T00:20:00Z",
+      "kind": "session.waiting",
+      "session": "Pricing page polish"
+    },
+    {
+      "at": "2026-10-30T06:00:00Z",
+      "kind": "dawn.step",
+      "step": "lights",
+      "ok": true
+    },
+    {
+      "at": "2026-10-30T06:00:01Z",
+      "kind": "dawn.step",
+      "step": "fans",
+      "ok": true
+    },
+    {
+      "at": "2026-10-30T06:00:02Z",
+      "kind": "dawn.step",
+      "step": "power",
+      "ok": true
+    },
+    {
+      "at": "2026-10-30T06:00:03Z",
+      "kind": "dawn.step",
+      "step": "screens",
+      "ok": true
+    },
+    {
+      "at": "2026-10-30T06:00:04Z",
+      "kind": "dawn.step",
+      "step": "recap",
+      "ok": true
+    }
+  ],
+  "needsOwner": [
+    "harbor-site: pick one of two hero headlines",
+    "pixel-forge: a licence key for the export test",
+    "Pricing page polish waits on a permission dialog",
+    "ledger-app: confirm the currency rounding rule"
+  ],
+  "usage": {
+    "fiveHour": {
+      "percent": 38,
+      "resetsAt": "2026-10-30T08:00:00Z"
+    },
+    "sevenDay": {
+      "percent": 61,
+      "resetsAt": "2026-11-02T18:00:00Z"
+    }
+  }
+}
