@@ -27,8 +27,11 @@ export function workerPaths(paths, files, date, slot, project) {
     worktree: project ? join(share, 'worktrees', date, project) : null,
     scratch: join(share, 'scratch', date, String(slot)),
     settings: join(files.dir, 'worker-settings.json'),
-    decisions: join(files.dir, 'decisions.md'),
-    testLock: join(paths.runtime, 'night-tests.lock'),
+    // Inside the scratch folder, because the sandbox lets a worker write nowhere else outside its worktree.
+    decisions: join(share, 'scratch', date, String(slot), 'decisions.md'),
+    // /tmp is shared with the host inside the sandbox (/run/user is read-only there), and the
+    // owner's own sessions use this same lock for their test runs.
+    testLock: paths.testLock ?? '/tmp/night-tests.lock',
   }
 }
 

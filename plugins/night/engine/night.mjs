@@ -427,8 +427,17 @@ export function recapInput(paths, date, { now, zone }) {
   for (const s of live.filter((x) => x.label === 'waiting')) needsOwner.push(`${s.name} waits on ${s.on}`)
   if (current.unsafe?.length) needsOwner.push('workers did not start: the safety check failed')
   if (readJson(files.usage, {})?.loginError) needsOwner.push('Claude Code needs a fresh login')
+  const decisions = []
+  for (let slot = 1; slot <= 4; slot++) {
+    try {
+      const text = readFileSync(join(paths.share, 'scratch', date, String(slot), 'decisions.md'), 'utf8')
+      for (const line of text.split('\n')) if (line.trim()) decisions.push(line.trim().slice(0, 300))
+    } catch { /* no decisions from this slot */ }
+  }
+  if (decisions.length) needsOwner.push(`${decisions.length} call${decisions.length === 1 ? '' : 's'} made for you, in decisions.md`)
   const usage = readJson(files.usage, null)
   return {
+    decisions,
     date,
     zone,
     window: { start, end: current.end ?? now },
