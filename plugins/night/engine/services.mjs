@@ -30,10 +30,15 @@ export async function serviceLoop(name, turn, { paths, intervalMs }) {
     const files = current.date ? nightFiles(paths, current.date) : null
     let wait = intervalMs
     if (RUNNING.has(current.phase)) {
+      // A turn may take minutes (a planner call); the beat goes on while it runs.
+      beat(files, name)
+      const beating = setInterval(() => beat(files, name), 30_000)
       try {
         wait = (await turn({ current, files })) ?? intervalMs
       } catch (err) {
         addEvent(files, 'service.error', { name, error: String(err?.stack ?? err).slice(0, 500) })
+      } finally {
+        clearInterval(beating)
       }
       beat(files, name)
     } else {
@@ -253,8 +258,11 @@ export function medicTurn(paths, m) {
     }
     writeJson(files.sessions, { at: now, sessions })
 
-    const beats = readBeats(files)
+    // A service gets three minutes after dusk, and after each restart, before a missing beat counts.
+    const graceOver = now - (current.duskAt ?? 0) > 3 * 60_000
+    const beats = graceOver ? readBeats(files) : null
     const paused = readJson(join(files.dir, 'paused.json'), { slots: [] }).slots ?? []
+    if (!beats) return 60_000
     for (let slot = 1; slot <= config.sessions; slot++) {
       if (paused.includes(slot)) continue
       if (staleBeats(beats, [`worker-${slot}`], now, 3 * 60_000).length) await restart(files, `night-worker@${slot}.service`, 'its beat is late')

@@ -3,7 +3,7 @@
 // terminal. Commands the pane uses print one JSON object; the services never
 // return. Inside a night worker (NIGHT_WORKER=1) every command that changes the
 // night is refused, so a worker on this very repo cannot stop or rearm it.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,14 +43,26 @@ export function findClaude(home, env = process.env) {
   return which.status === 0 ? which.stdout.trim() : null
 }
 
-/** Runs Claude with argv and resolves with stdout (planner and publisher calls). */
-function callClaude(claude, cwd) {
-  return async (args) => {
-    const r = spawnSync(claude, args, { cwd, encoding: 'utf8', input: '', timeout: 6 * 60_000, maxBuffer: 64 * 1024 * 1024 })
-    if (r.error) throw r.error
-    if (r.status !== 0 && !r.stdout) throw new Error((r.stderr || `claude exited ${r.status}`).slice(-500))
-    return r.stdout
-  }
+/**
+ * Runs Claude with argv and resolves with stdout (planner and publisher calls).
+ * Asynchronous on purpose: a blocking call would stop the service's heartbeat and
+ * its SIGTERM handler for minutes.
+ */
+function callClaude(claude, cwd, { timeoutMs = 6 * 60_000 } = {}) {
+  return (args) => new Promise((resolve, reject) => {
+    const child = spawn(claude, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    let err = ''
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs)
+    child.stdout.on('data', (chunk) => { out += chunk })
+    child.stderr.on('data', (chunk) => { err = (err + chunk).slice(-2000) })
+    child.on('error', (e) => { clearTimeout(timer); reject(e) })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code !== 0 && !out) reject(new Error((err || `claude exited ${code}`).slice(-500)))
+      else resolve(out)
+    })
+  })
 }
 
 /** Writes the recap for the night, and publishes it when asked. */
