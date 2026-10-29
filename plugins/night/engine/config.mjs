@@ -24,6 +24,8 @@ export function nightPaths({ env = process.env, home = env.HOME || homedir() } =
     usageCache: join(claude, 'tacos', 'usage-cache.json'),
     units: join(env.XDG_CONFIG_HOME || join(home, '.config'), 'systemd', 'user'),
     runtime: env.XDG_RUNTIME_DIR || join(root, 'run'),
+    // Worktrees and scratch folders live outside ~/.claude, which Claude Code guards.
+    share: env.NIGHT_SHARE || join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'night'),
   }
 }
 
