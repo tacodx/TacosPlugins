@@ -378,3 +378,53 @@ Instead:
   Memory pressure (PSI) still pauses workers as before.
 - Cut from v1: the idle wait at dusk (KDE Wayland does not report idle time), building fan modes through the
   API, the hourly HTML recap (the pane reads the live view), and a third pane tab.
+
+## 9. What the code review and the first live night changed (2026-10-29, evening)
+
+A test night ran from 20:00 on two demo repositories, with its own state folder and no hardware changes, while
+`night chaos` killed every part and a second reviewer read the code. Every finding below was fixed, with a test.
+
+### 9.1 Found by running it
+
+- The planner call blocked the conductor's event loop, so it could neither beat nor stop; and the medic restarted
+  services before their first beat. The planner is now asynchronous, a service beats every 30 s through a long
+  turn, and missing beats count only three minutes after dusk.
+- Inside the sandbox `/run/user` is read-only, so the first test lock failed. The lock is `/tmp/night-tests.lock`
+  (shared with the host and with the owner's own sessions), and decisions go to each worker's scratch folder.
+- After its Claude was killed, a worker started a new session instead of resuming: the per-session item count
+  still held the last project's number. It starts again with each session. The kill test then showed the same
+  session back in 11 s.
+- The sandbox leaves empty files in the working folder as mount points (`.bashrc`, `.gitconfig`,
+  `.claude/settings.json` and 19 more); a commit of leftovers swept them in. Workers' git ignores them through its
+  own excludes file, which keeps the owner's global ignore, and a leftover commit takes tracked changes and
+  non-empty new files only.
+- The recap listed every open desktop session and counted a skipped fan step as failed; it now shows a desktop
+  session only when it committed tonight or waits on a dialog.
+
+Proven on the machine: every service killed with SIGKILL beat again from a new process within 6 s; a watcher
+frozen with SIGSTOP was restarted by the medic after its beat went three minutes stale; `night.target` stopped by
+hand came back through the keeper; forced memory pressure paused the largest worker, which ended its run,
+committed its work and gave the item back, and the workers resumed after two clear minutes; dawn ran once through
+its unit and a second firing changed nothing; Stop returned to the pane in 132 ms and `night-stop.service` ended
+everything, released every item and removed the timers; the keeper then left the stopped night alone; the recap
+was published to a private artifact and updated in place.
+
+### 9.2 Found by the code review
+
+- `git fetch . HEAD:main` and `git rebase HEAD main` moved a protected branch with no checkout. Refspecs into a
+  protected branch and a rebase onto one are denied, as are `core.hooksPath`, `-c url/pushurl/credential`
+  settings and any assignment to the variables that hold the walls.
+- A remote with its own `pushurl` ignores `pushInsteadOf`. Workers now also have no credential helper and no
+  ssh, so such a push has nothing to push with; the canary checks both.
+- The worker settings carry the push block and `disableAllHooks: false`; given with `--settings`, they outrank
+  anything a worker writes into the project's own settings. The hook may take two minutes.
+- The canary accepted exit 2, which a guard that cannot start also returns; it now needs the guard's own deny for
+  a push and an allowed read.
+- A result line mentioning a usage limit read as a limit; five partial runs now park an item.
+- `OOMPolicy=continue`, so an out-of-memory kill ends the test, not the worker unit.
+- A worktree left detached or mid-rebase is put back on its branch with its work.
+- Dusk, dawn, Stop and the keeper share one lock, and dawn is marked started before its steps, so a dawn timer and
+  the keeper cannot both run the RGB script and publish. A Stop during dusk keeps the later steps from running.
+- The pump is read from `sensors` output even when it exits non-zero; an unreadable pump is recorded; a fan
+  fallback to Day for heat or the pump is held against a medic retry of the dusk fans step.
+- The publisher gets Read as well as Artifact, nothing else.
