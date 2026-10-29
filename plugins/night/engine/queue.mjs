@@ -160,9 +160,9 @@ export function counts(queue) {
 /**
  * The project to plan next, or null: when fewer than two open items per session
  * are left, the first project (in the owner's order) with fewer than two open
- * items of its own, not planned in the last 20 minutes, and not twice found empty.
+ * items of its own, not planned in the last 5 minutes, and not twice found empty.
  */
-export function nextToPlan(queue, projects, { sessions, now, busy = new Set(), coolMs = 20 * 60_000 }) {
+export function nextToPlan(queue, projects, { sessions, now, busy = new Set(), coolMs = 5 * 60_000 }) {
   const open = queue.items.filter((i) => i.status === 'open')
   if (open.length >= 2 * sessions) return null
   for (const project of projects) {

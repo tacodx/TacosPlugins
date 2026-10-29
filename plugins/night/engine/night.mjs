@@ -362,7 +362,8 @@ export function view(paths, m) {
   const workers = []
   for (let slot = 1; slot <= config.sessions; slot++) {
     const ws = files ? readJson(join(files.workers, `${slot}.json`), {}) ?? {} : {}
-    workers.push({ slot, state: ws.state ?? 'off', project: ws.project ?? null, item: ws.itemTitle ?? null, since: ws.since ?? null, limitedUntil: ws.limitedUntil ?? null })
+    const onItem = ['working', 'limited', 'backoff', 'retrying', 'paused'].includes(ws.state)
+    workers.push({ slot, state: ws.state ?? 'off', project: onItem ? ws.project ?? null : null, item: onItem ? ws.itemTitle ?? null : null, since: ws.since ?? null, limitedUntil: ws.limitedUntil ?? null })
   }
   const health = files ? readJson(files.health, null) : null
   const usage = files ? readJson(files.usage, null) : null
