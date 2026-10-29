@@ -10,7 +10,7 @@ import { readJson, readJsonl, writeJson } from '../engine/fsx.mjs'
 import { ensureWorktree } from '../engine/git.mjs'
 import { addPlan, emptyQueue, readQueue } from '../engine/queue.mjs'
 import { writeCurrent } from '../engine/state.mjs'
-import { runClaude, workerTurn } from '../engine/worker.mjs'
+import { commitLeftovers, runClaude, workerTurn } from '../engine/worker.mjs'
 import { tempDir } from './helpers.mjs'
 
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fakes', 'claude.mjs')
@@ -67,7 +67,7 @@ test('a worker takes an item, works in a night worktree, and the item ends done 
   const call = s.calls()[0]
   assert.match(call.cwd, /\.local\/share\/night\/worktrees\/2026-03-10\/alpha$/)
   assert.equal(call.env.NIGHT_WORKER, '1')
-  assert.equal(call.env.GIT_CONFIG_COUNT, '6')
+  assert.equal(call.env.GIT_CONFIG_COUNT, '7')
   assert.ok(call.args.includes('--session-id'))
   assert.equal(call.args[call.args.indexOf('--setting-sources') + 1], 'project,local')
   const branch = execFileSync('git', ['log', '-1', '--format=%s', 'night/2026-03-10/alpha'], { cwd: s.repo, encoding: 'utf8' })
@@ -189,4 +189,31 @@ test('a run that dies before Claude names its session is not resumed: the next r
   const [, second] = s.calls()
   assert.ok(second.args.includes('--session-id'))
   assert.ok(!second.args.includes('--resume'))
+})
+
+test('leftovers at a stop are committed without the empty mount points the sandbox leaves', (t) => {
+  const s = setup(t)
+  const wt = join(s.home, 'wt')
+  ensureWorktree(s.repo, wt, 'night/x/alpha', 'feature')
+  for (const f of ['.bashrc', '.gitconfig']) writeFileSync(join(wt, f), '')
+  mkdirSync(join(wt, '.claude'), { recursive: true })
+  writeFileSync(join(wt, '.claude', 'settings.json'), '')
+  writeFileSync(join(wt, 'empty-but-mine.txt'), '')
+  writeFileSync(join(wt, 'notes.md'), 'real work\n')
+  writeFileSync(join(wt, 'README.md'), 'alpha, changed\n')
+  const git = (...args) => execFileSync('git', args, { cwd: wt, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } })
+  const env = process.env
+  Object.assign(process.env, GIT_ENV)
+  t.after(() => { for (const k of Object.keys(GIT_ENV)) delete env[k] })
+  assert.equal(commitLeftovers(wt, 'stop'), true)
+  const files = git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort()
+  assert.deepEqual(files, ['README.md', 'notes.md'])
+})
+
+test('the worker\'s git ignores the placeholders on top of the owner\'s own ignore file', async () => {
+  const { excludesText } = await import('../engine/claude.mjs')
+  const text = excludesText('node_modules/\n.DS_Store\n')
+  assert.match(text, /^node_modules\/\n\.DS_Store\n# night/)
+  assert.match(text, /^\/\.claude\/settings\.json$/m)
+  assert.match(text, /^\/\.bashrc$/m)
 })

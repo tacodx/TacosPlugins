@@ -38,12 +38,29 @@ export function workerSettings({ node, guard, env = {} }) {
 
 const pick = (env, keep) => Object.fromEntries(Object.entries(env).filter(([key]) => keep(key)))
 
+/**
+ * Empty files Claude's Bash sandbox leaves in the working folder as mount points for
+ * paths it protects. They are not work: workers' git ignores them, and a commit of
+ * leftovers never takes them.
+ */
+export const SANDBOX_PLACEHOLDERS = [
+  '.bash_profile', '.bashrc', '.profile', '.zprofile', '.zshrc', '.gitconfig', '.gitmodules', '.ripgreprc', '.mcp.json',
+  '.idea', '.vscode', '.claude/agents', '.claude/commands', '.claude/hooks', '.claude/launch.json', '.claude/loop.md',
+  '.claude/output-styles', '.claude/routines', '.claude/scheduled_tasks.json', '.claude/settings.json', '.claude/skills',
+  '.claude/workflows',
+]
+
+/** The worker's git excludes: the owner's own global ignore file, then the placeholders. */
+export function excludesText(globalIgnore = '') {
+  return `${globalIgnore.trimEnd()}\n# night: the empty mount points Claude's sandbox leaves behind\n${SANDBOX_PLACEHOLDERS.map((p) => `/${p}`).join('\n')}\n`.trimStart()
+}
+
 const PUSH_BLOCK = ['https://', 'http://', 'git@', 'ssh://', 'git://']
 // After the push rewrites: an empty credential.helper clears every helper, so https has no credentials either.
 const EXTRA_CONFIG = [['credential.helper', '']]
 
 /** The environment of a worker's Claude session. */
-export function workerEnv(base, { slot, worktree, scratch, protectedBranches, testLock, events, decisions, secrets = [] }) {
+export function workerEnv(base, { slot, worktree, scratch, protectedBranches, testLock, events, decisions, secrets = [], excludesFile }) {
   const env = { ...base }
   for (const key of ['DISPLAY', 'WAYLAND_DISPLAY', 'SSH_AUTH_SOCK', 'GIT_DIR', 'GIT_WORK_TREE', 'CLAUDECODE', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN']) delete env[key]
   for (const key of Object.keys(env)) if (key.startsWith('GIT_CONFIG_')) delete env[key]
@@ -79,7 +96,9 @@ export function workerEnv(base, { slot, worktree, scratch, protectedBranches, te
     env[`GIT_CONFIG_KEY_${i}`] = 'url.night-blocked:.pushInsteadOf'
     env[`GIT_CONFIG_VALUE_${i}`] = prefix
   })
-  EXTRA_CONFIG.forEach(([key, value], j) => {
+  const extra = excludesFile ? [...EXTRA_CONFIG, ['core.excludesFile', excludesFile]] : EXTRA_CONFIG
+  env.GIT_CONFIG_COUNT = String(PUSH_BLOCK.length + extra.length)
+  extra.forEach(([key, value], j) => {
     env[`GIT_CONFIG_KEY_${PUSH_BLOCK.length + j}`] = key
     env[`GIT_CONFIG_VALUE_${PUSH_BLOCK.length + j}`] = value
   })

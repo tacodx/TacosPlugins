@@ -4,14 +4,14 @@
 // It can be killed at any moment. Its state lives in workers/<slot>.json and the
 // queue, so a restart picks up the item it held and resumes the same Claude
 // session. Effects come in through `deps`, so tests drive it with a fake Claude.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { backoffMs, itemPrompt, readRun, workerArgs, workerEnv, workerSettings } from './claude.mjs'
+import { backoffMs, excludesText, itemPrompt, readRun, SANDBOX_PLACEHOLDERS, workerArgs, workerEnv, workerSettings } from './claude.mjs'
 import { loadConfig, nightFiles } from './config.mjs'
-import { appendJsonl, readJson, writeJson } from './fsx.mjs'
+import { appendJsonl, readJson, writeJson, writeText } from './fsx.mjs'
 import { dirtyPaths, ensureWorktree, runGit } from './git.mjs'
 import { claim, heldBy, heldByOthers, pickItem, readQueue, releaseSlot, settle, withQueue } from './queue.mjs'
 import { addEvent, beat, readCurrent, RUNNING } from './state.mjs'
@@ -120,11 +120,30 @@ export function runClaude({ claude, args, cwd, env, streamPath, watch, onLine, o
   })
 }
 
-/** Commits whatever a stopped worker left in its worktree, so nothing is lost. */
+const sizeOf = (path) => {
+  try { return statSync(path).size } catch { return 0 }
+}
+
+/** The owner's global git ignore file, so the worker's excludes keep it. */
+function globalIgnore(home) {
+  const configured = spawnSync('git', ['config', '--global', '--get', 'core.excludesFile'], { encoding: 'utf8' }).stdout?.trim()
+  const path = configured ? configured.replace(/^~(?=\/)/, home) : join(home, '.config', 'git', 'ignore')
+  try { return readFileSync(path, 'utf8') } catch { return '' }
+}
+
+/**
+ * Commits whatever a stopped worker left in its worktree, so nothing is lost:
+ * every change to a tracked file, and new files that are not empty (the sandbox
+ * leaves empty mount points behind, which are not work).
+ */
 export function commitLeftovers(worktree, note, { run = runGit } = {}) {
   if (!worktree || !existsSync(worktree) || dirtyPaths(worktree, { run }).length === 0) return false
   try {
-    run(['add', '-A'], { cwd: worktree })
+    run(['add', '-u'], { cwd: worktree })
+    const fresh = (run(['ls-files', '--others', '--exclude-standard', '-z'], { cwd: worktree }) ?? '').split('\0').filter(Boolean)
+    const real = fresh.filter((file) => !SANDBOX_PLACEHOLDERS.includes(file) && sizeOf(join(worktree, file)) > 0)
+    if (real.length) run(['add', '--', ...real], { cwd: worktree })
+    if (!run(['diff', '--cached', '--name-only'], { cwd: worktree }).trim()) return false
     run(['-c', 'user.useConfigOnly=false', 'commit', '-q', '-m', `night: work in progress at ${note}`], { cwd: worktree })
     return true
   } catch {
@@ -186,7 +205,10 @@ export async function workerTurn(slot, { paths, deps }) {
   const sessionId = sameSession ? ws.sessionId : deps.uuid()
   const resume = Boolean(sameSession && ws.sessionStarted)
   const prompt = itemPrompt(item, { branch, resumed: resume && !continuing, continuing })
+  const excludesFile = join(paths.share, 'scratch', current.date, 'git-excludes')
+  if (!existsSync(excludesFile)) writeText(excludesFile, excludesText(globalIgnore(paths.home)), { mode: 0o644 })
   const env = workerEnv(deps.env, {
+    excludesFile,
     slot,
     worktree: place.worktree,
     scratch: place.scratch,
