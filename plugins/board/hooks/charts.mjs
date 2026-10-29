@@ -55,13 +55,16 @@ text{font-family:${MONO};font-size:10px;fill:${INK_2}}
 @keyframes rise{from{transform:scaleY(0)}}
 @media (prefers-reduced-motion: reduce){.rise{animation:none}}`
 
+// Control characters and halves of a character are not allowed in XML: a card holding one is not drawn.
+const UNDRAWABLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
 const esc = (value) =>
-  String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  String(value).replace(UNDRAWABLE, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const f = (n) => n.toFixed(1)
-/** `text` cut to what fits in `width` units at `size`, with an ellipsis when cut. */
+/** `text` cut to what fits in `width` units at `size`, with an ellipsis when cut, never inside a character. */
 function fit(text, width, size = 10) {
   const max = Math.max(1, Math.floor(width / (size * GLYPH)))
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+  const chars = Array.from(text)
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text
 }
 /** `text` broken into lines of at most `max` characters, at spaces where it can. */
 function wrap(text, max) {
@@ -69,10 +72,11 @@ function wrap(text, max) {
   let line = ''
   for (const word of String(text).split(/\s+/).filter(Boolean)) {
     let rest = word
-    while (rest.length > max) {
+    while (Array.from(rest).length > max) {
       if (line !== '') lines.push(line)
-      lines.push(rest.slice(0, max))
-      rest = rest.slice(max)
+      const chars = Array.from(rest)
+      lines.push(chars.slice(0, max).join(''))
+      rest = chars.slice(max).join('')
       line = ''
     }
     if (line === '') line = rest

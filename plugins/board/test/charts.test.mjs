@@ -114,6 +114,20 @@ test('names are escaped wherever they are written', () => {
   }
 })
 
+test('names are cut between characters, never inside one, and control characters are dropped', () => {
+  const svg = listCard({
+    eyebrow: 'Working now',
+    aside: '',
+    rows: [{ name: `${'😀'.repeat(60)}`, detail: 'a\u0007b\u001bc', colour: NEUTRAL }],
+    empty: '',
+  })
+
+  assertCard(svg)
+  assert.doesNotMatch(svg, /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/)
+  assert.doesNotMatch(svg, /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/)
+  assert.ok(svg.includes('>abc</text>'))
+})
+
 test('the sessions: a swatch in the project\'s colour, the name, and a line on what it is doing', () => {
   const svg = listCard({
     eyebrow: 'Working now',
