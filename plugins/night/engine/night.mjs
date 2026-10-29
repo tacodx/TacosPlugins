@@ -40,6 +40,18 @@ export function machine({ env = process.env } = {}) {
   }
 }
 
+/** The open projects for the pane before any night has run, cached for ten minutes. */
+export function previewProjects(paths, config, now = Date.now()) {
+  const cachePath = join(paths.root, 'projects-preview.json')
+  const cached = readJson(cachePath, null)
+  if (cached && now - cached.at < 10 * 60_000) return cached.projects
+  const notes = config.sources.notesDir ? readNotes(config.sources.notesDir.replace(/^~(?=\/)/, paths.home)) : []
+  const projects = findProjects(notes, { home: paths.home, openStatuses: config.sources.openStatuses, excludeAreas: config.sources.excludeAreas })
+    .map((p) => ({ name: p.name, status: ['Doing', 'Planned', 'Paused'][p.rank] ?? 'Open' }))
+  writeJson(cachePath, { at: now, projects })
+  return projects
+}
+
 /** Every open project in the owner's order, with the branch the night builds on (cached per night). */
 export function nightProjects(paths, config, date, { refresh = false, now = Date.now() } = {}) {
   const files = nightFiles(paths, date)
@@ -215,9 +227,11 @@ export async function dusk(paths, m, { node = process.execPath, guard } = {}) {
 }
 
 /** At "to": the machine comes back and the recap is written. Workers go on until Stop. */
-export async function dawn(paths, m, { recap } = {}) {
+export async function dawn(paths, m, { recap, force = false } = {}) {
   const current = readCurrent(paths)
   if (!current.date || current.phase === 'idle' || current.phase === 'armed') return current
+  // Once is enough: a timer that fires again must not switch the lights on or publish twice.
+  if (current.dawnAt && !force) return current
   const { config } = loadConfig(paths)
   await runSteps(paths, 'dawn', DAWN_STEPS, hardwareCtx(paths, config, m), m)
   const next = updateCurrent(paths, (c) => ({ ...c, phase: c.phase === 'stopped' ? 'stopped' : 'day', dawnAt: c.dawnAt ?? m.now() }))
@@ -342,7 +356,7 @@ export function view(paths, m) {
   let token = false
   try { token = Boolean(tokenPath && readFileSync(tokenPath, 'utf8').trim()) } catch { token = false }
   const recap = files ? readJson(files.recap, null) : null
-  const allProjects = date ? readJson(join(files.dir, 'projects.json'), null)?.projects ?? [] : []
+  const allProjects = (date ? readJson(join(files.dir, 'projects.json'), null)?.projects : null) ?? previewProjects(paths, config, now)
   return {
     version: 1,
     now,

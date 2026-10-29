@@ -149,6 +149,7 @@ export async function workerTurn(slot, { paths, deps }) {
   }
 
   if (slot > config.sessions) return idle('off', 60_000)
+  if (current.unsafe?.length) return idle('unsafe', 60_000)
   if (isPaused(files, slot)) return idle('paused', 15_000)
   if (blockers(files) > 0) return idle('blocked', 30_000)
   if (loginBlocked(files)) return idle('login', 60_000)

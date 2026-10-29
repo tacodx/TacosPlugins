@@ -139,8 +139,8 @@ export async function main(argv, env = process.env) {
       const include = config.projects.include.length && on ? [...new Set([...config.projects.include, rest[0]])] : config.projects.include.filter((n) => on || n !== rest[0])
       saveConfig(paths, { projects: { exclude, include } })
     })
-    case 'arm': return act(() => arm(paths, m))
-    case 'start': return act(() => arm(paths, m, { startNow: true }))
+    case 'arm': return act(async () => { await ensureInstalled(paths, m, env); await arm(paths, m) })
+    case 'start': return act(async () => { await ensureInstalled(paths, m, env); await arm(paths, m, { startNow: true }) })
     case 'disarm': return act(() => disarm(paths, m))
     case 'stop': return act(() => stop(paths, m, { recap }))
     case 'dusk': await dusk(paths, m, { guard: GUARD }); return 0
@@ -193,6 +193,11 @@ export async function main(argv, env = process.env) {
       process.stdout.write('usage: night view|status|set FROM TO|sessions N|project NAME on|off|arm|disarm|start|stop|recap [--publish]|canary|install|uninstall|doctor\n')
       return command === 'help' ? 0 : 2
   }
+}
+
+/** Installs the units first if they are not there, so Arm works on a fresh machine. */
+async function ensureInstalled(paths, m, env) {
+  if (!existsSync(join(paths.units, 'night.target'))) await install(paths, m, installArgs(env))
 }
 
 function installArgs(env) {

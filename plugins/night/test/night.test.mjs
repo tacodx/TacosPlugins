@@ -176,3 +176,21 @@ test('the view tells the pane the phase, the window, each worker and the queue',
   assert.equal(v.fans.token, false)
   assert.ok(v.watchers.length >= 5)
 })
+
+test('dawn runs once: a timer that fires again changes nothing', async (t) => {
+  const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
+  await arm(s.paths, s.m)
+  await dawn(s.paths, s.m)
+  s.calls.length = 0
+  let recaps = 0
+  await dawn(s.paths, s.m, { recap: async () => { recaps++ } })
+  assert.equal(s.calls.length, 0)
+  assert.equal(recaps, 0)
+})
+
+test('before any night the view lists the open projects from the notes', async (t) => {
+  const s = fakeMachine(t)
+  const v = view(s.paths, s.m)
+  assert.deepEqual(v.projects, [])
+  assert.equal(v.phase, 'idle')
+})

@@ -153,3 +153,10 @@ test('the worker settings carry the sandbox, the fail-closed guard and no attrib
   assert.equal(settings.includeCoAuthoredBy, false)
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /\|\| exit 2$/)
 })
+
+test('after a failed canary no worker starts any Claude run', async (t) => {
+  const s = setup(t)
+  writeCurrent(s.paths, { phase: 'night', date: DATE, unsafe: ['the guard hook did not deny a git push'] })
+  assert.equal((await workerTurn(1, { paths: s.paths, deps: s.deps })).state, 'unsafe')
+  assert.equal(s.calls().length, 0)
+})
