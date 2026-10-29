@@ -159,6 +159,22 @@ test('the plan: number and name per row, done rows struck and dimmed, a status b
   assert.match(svg, /\.done\{[^}]*text-decoration:line-through/)
 })
 
+test('a status has the room a short name leaves; a long name keeps room for it', () => {
+  const svg = planCard({
+    eyebrow: 'The plan',
+    aside: '',
+    rows: [
+      { id: '7', name: 'Build', note: 'Built overnight 2026-03-09, half restyled', done: false },
+      { id: '8', name: 'A step whose name alone would fill the whole line of this card', note: 'Started 2026-03-02', done: false },
+    ],
+  })
+
+  assertCard(svg)
+  assert.ok(svg.includes('>Built overnight 2026-03-09, half restyled</text>'))
+  assert.match(svg, />A step whose name alone[^<]*…<\/text>/)
+  assert.match(svg, />Start[^<]*…<title>Started 2026-03-02<\/title><\/text>/)
+})
+
 test('a card that would be too large to draw is replaced by one that says so', () => {
   const rows = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), name: `Row number ${i}`, note: 'Some status of the row', done: i % 2 === 0 }))
 

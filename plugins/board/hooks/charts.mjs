@@ -304,12 +304,13 @@ export function planCard({ eyebrow, aside = '', rows }) {
   if (rows.length === 0) parts.push(`<text class="dim" x="${PAD}" y="${top}">The table has no rows.</text>`)
   rows.forEach((each, i) => {
     const y = top + i * row
-    const note = each.done ? '' : fit(each.note, INNER * 0.42)
-    const noteWidth = note === '' ? 0 : note.length * 10 * GLYPH + 10
+    const wanted = each.done ? '' : each.note
+    // The name keeps what it needs, short of the last 80 units when there is a status;
+    // the status has the rest of the line.
+    const name = fit(each.name, INNER - idWidth - (wanted === '' ? 0 : 80))
+    const note = wanted === '' ? '' : fit(wanted, INNER - idWidth - name.length * 10 * GLYPH - 16)
     parts.push(`<text class="dim" x="${PAD}" y="${y}">${esc(fit(each.id, idWidth - 6))}</text>`)
-    parts.push(
-      `<text class="${each.done ? 'done' : 'ink'}" x="${PAD + idWidth}" y="${y}">${esc(fit(each.name, INNER - idWidth - noteWidth))}</text>`,
-    )
+    parts.push(`<text class="${each.done ? 'done' : 'ink'}" x="${PAD + idWidth}" y="${y}">${esc(name)}</text>`)
     if (note !== '') {
       const whole = note === each.note ? '' : `<title>${esc(each.note)}</title>`
       parts.push(`<text class="dim" x="${WIDTH - PAD}" y="${y}" text-anchor="end">${esc(note)}${whole}</text>`)
