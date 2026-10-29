@@ -58,3 +58,38 @@ test('the root readme lists model-advisor in the plugin table', () => {
   const r = read('README.md')
   assert.match(r, /model-advisor/)
 })
+
+test('the board readme says what it needs: a Claude Code with mods, Node and git', () => {
+  const r = read('plugins/board/README.md')
+  assert.match(r, /2\.1\.292/)
+  assert.match(r, /Node 22/)
+  assert.match(r, /\bgit\b/)
+})
+
+test('the board readme names the one folder it writes to', () => {
+  const r = read('plugins/board/README.md')
+  assert.match(r, /writes to exactly one folder, `~\/\.claude\/tacos\/board\/`/)
+})
+
+// sessions.test.mjs holds the code to the first claim: the session list is read
+// by its .json files alone.
+test('the board readme says the key files are never opened and nothing leaves the machine', () => {
+  const r = read('plugins/board/README.md')
+  assert.match(r, /never opens the key\s+files/)
+  assert.match(r, /## What leaves your machine\s+Nothing\./)
+})
+
+test('the board readme has a Limitations section', () => {
+  const r = read('plugins/board/README.md')
+  assert.match(r, /^## Limitations/m)
+})
+
+test('the board readme does not claim to be Anthropic\'s', () => {
+  const r = read('plugins/board/README.md')
+  assert.match(r, /not (made|built|affiliated)[^.]*Anthropic/i)
+})
+
+test('the root readme lists board in the plugin table', () => {
+  const r = read('README.md')
+  assert.match(r, /\[`board`\]\(plugins\/board\/README\.md\)/)
+})

@@ -10,6 +10,7 @@ release time.
 |---|---|
 | [`usage-guard`](plugins/usage-guard/README.md) | Per-chat budgets enforced against your account's real rate-limit gauges (5-hour, weekly, extra usage, per-model). |
 | [`model-advisor`](plugins/model-advisor/README.md) | Tells you whether switching models would actually help your current rate limits — informational only, never denies anything. |
+| [`board`](plugins/board/README.md) | `/board` opens a pane that shows the work going on: commits per hour and per project, the sessions working now and your plan, refreshed every few minutes. A mod, so it needs Claude Code 2.1.292 or newer. |
 
 ## Installation
 
@@ -31,10 +32,15 @@ TacosPlugins/
 │   │   ├── .claude-plugin/plugin.json
 │   │   ├── hooks/, commands/, bin/
 │   │   └── lib/                      # vendored copy of packages/core (tracked in git)
-│   └── model-advisor/
+│   ├── model-advisor/
+│   │   ├── .claude-plugin/plugin.json
+│   │   ├── hooks/, commands/, bin/
+│   │   └── lib/                      # vendored copy of packages/core (tracked in git)
+│   └── board/                        # a mod; standalone, so no lib/
 │       ├── .claude-plugin/plugin.json
-│       ├── hooks/, commands/, bin/
-│       └── lib/                      # vendored copy of packages/core (tracked in git)
+│       ├── hooks/                    # the mod: pane, cards
+│       ├── reader/                   # the Node program that reads git, sessions and the plan
+│       ├── types/, test/
 └── scripts/release.mjs               # copies packages/core into each plugin that uses it
 ```
 
