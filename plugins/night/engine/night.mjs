@@ -300,7 +300,7 @@ export async function keep(paths, m, hooks = {}) {
 /** Installs every unit night needs. */
 export async function install(paths, m, { node, cli, pathEnv }) {
   const { config } = loadConfig(paths)
-  const units = buildUnits({ node, cli, sessions: config.sessions, memoryHigh: config.worker.memoryHigh, memoryMax: config.worker.memoryMax, pathEnv, nightHome: process.env.NIGHT_HOME || undefined })
+  const units = buildUnits({ node, cli, sessions: config.sessions, memoryHigh: config.worker.memoryHigh, memoryMax: config.worker.memoryMax, pathEnv, nightHome: process.env.NIGHT_HOME || undefined, nightShare: process.env.NIGHT_SHARE || undefined })
   const changed = writeUnits(paths.units, units)
   await m.systemctl('daemon-reload')
   await m.systemctl('enable', '--now', 'night-keeper.timer')

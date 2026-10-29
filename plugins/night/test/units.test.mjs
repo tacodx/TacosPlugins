@@ -246,3 +246,17 @@ test('writing creates the unit folder when it is missing', (t) => {
   mkdirSync(dir, { recursive: true })
   assert.deepEqual(readdirSync(dir), ['night.target'])
 })
+
+test('workers run in one slice with a shared ceiling, and neither the slice nor a worker may swap', () => {
+  const units = buildUnits({ node: '/usr/bin/node', cli: '/p/bin/night.mjs', sessions: 2, memoryHigh: '5G', memoryMax: '6G' })
+  assert.match(units['night.slice'], /^MemoryMax=18G$/m)
+  assert.match(units['night.slice'], /^MemorySwapMax=0$/m)
+  assert.match(units['night-worker@.service'], /^Slice=night\.slice$/m)
+  assert.match(units['night-worker@.service'], /^MemorySwapMax=0$/m)
+})
+
+test('a test install can move the night\'s state and share folders', () => {
+  const units = buildUnits({ node: '/usr/bin/node', cli: '/p/bin/night.mjs', sessions: 1, memoryHigh: '5G', memoryMax: '6G', nightHome: '/t/n', nightShare: '/t/s' })
+  assert.match(units['night-medic.service'], /^Environment=NIGHT_SHARE=\/t\/s$/m)
+  assert.match(units['night-worker@.service'], /^Environment=NIGHT_HOME=\/t\/n$/m)
+})

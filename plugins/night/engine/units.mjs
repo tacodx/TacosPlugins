@@ -17,6 +17,7 @@ const LONG_RUNNING = ['conductor', 'health', 'logs', 'usage', 'medic']
 /** Every static unit file, in the order they are listed. The two dusk and dawn timers are in TIMER_NAMES. */
 export const UNIT_NAMES = Object.freeze([
   'night.target',
+  'night.slice',
   ...LONG_RUNNING.map((name) => `night-${name}.service`),
   'night-worker@.service',
   'night-power.service',
@@ -71,7 +72,7 @@ function render(what, sections) {
 }
 
 /** The text of every static unit, by file name. `nightHome` is only for test installs. */
-export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv, nightHome }) {
+export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv, nightHome, nightShare, sliceMax = '18G' }) {
   absolutePath(node, 'node')
   absolutePath(cli, 'cli')
   oneLine(memoryHigh, 'memoryHigh')
@@ -79,6 +80,7 @@ export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv
   const environment = [
     pathEnv === undefined ? '' : envLine('PATH', oneLine(pathEnv, 'pathEnv')),
     nightHome === undefined ? '' : envLine('NIGHT_HOME', absolutePath(nightHome, 'nightHome')),
+    nightShare === undefined ? '' : envLine('NIGHT_SHARE', absolutePath(nightShare, 'nightShare')),
   ]
   const night = (...words) => `ExecStart=${[execWord(node), execWord(cli), ...words].join(' ')}`
   const workers = workerUnits(sessions)
@@ -95,11 +97,17 @@ export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv
       Service: ['Type=simple', night('run', name), 'Restart=always', 'RestartSec=5', 'WorkingDirectory=%h', ...environment],
     })
   }
+  // All workers share one slice with a ceiling, and none may push its memory into swap: the
+  // kernel ends a runaway test inside the night instead of letting the machine thrash.
+  units['night.slice'] = render('the slice every worker runs in, with one memory ceiling for all of them', {
+    Unit: ['Description=Night workers'],
+    Slice: [`MemoryMax=${oneLine(sliceMax, 'sliceMax')}`, 'MemorySwapMax=0'],
+  })
   units['night-worker@.service'] = render('the worker service, one instance per session', {
     Unit: ['Description=Night worker %i', 'PartOf=night.target', never],
     Service: [
-      'Type=simple', night('worker', '%i'), 'Restart=always', 'RestartSec=10',
-      `MemoryHigh=${memoryHigh}`, `MemoryMax=${memoryMax}`, 'KillMode=control-group', 'TimeoutStopSec=60', 'Nice=5',
+      'Type=simple', night('worker', '%i'), 'Restart=always', 'RestartSec=10', 'Slice=night.slice',
+      `MemoryHigh=${memoryHigh}`, `MemoryMax=${memoryMax}`, 'MemorySwapMax=0', 'KillMode=control-group', 'TimeoutStopSec=60', 'Nice=5',
       'WorkingDirectory=%h', ...environment,
     ],
   })
