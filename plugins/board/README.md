@@ -56,7 +56,8 @@ The first run writes `~/.claude/tacos/board/config.json`:
 ```
 
 - **`repos`**: the repos to count. A folder that is a git repo, or a folder
-  followed by `/*` for every repo directly inside it. The first run lists
+  followed by `/*` for every repo directly inside it. Paths start with `~` or
+  `/`. The first run lists
   `~/Projects/*`, plus `~/Projects/<folder>/*` for each folder there that holds
   repos of its own (the `work` line above is an example of one).
 - **`plan`**: `{ "file": "~/path/to/ROADMAP.md", "section": "Next up" }`.
@@ -67,7 +68,8 @@ The first run writes `~/.claude/tacos/board/config.json`:
 - **`refreshMinutes`**: how often an open pane refreshes, from 1 to 60.
 - **`authors`**: whose commits count, by email. Left empty, a commit counts
   when its author is one of the identities your repos commit as (each repo's
-  `user.email`, or your global one).
+  `user.email`, or your global one). Where no repo has one at all, every
+  commit counts, whoever made it.
 
 Changes take effect at the next refresh.
 
@@ -76,7 +78,10 @@ Changes take effect at the next refresh.
 It reads:
 
 - **Your repos**, through `git show-ref` and `git log --all`. A repo whose refs
-  have not moved since the last refresh is not read again.
+  have not moved since the last refresh is not read again. A repo that takes
+  too long is left for the next refresh and keeps the commits read before.
+  A partial clone is never made to fetch: its commits count, its lines do not,
+  and the pane says so.
 - **The plan file**, if you name one.
 - **`~/.claude/sessions/*.json`**, Claude Code's own list of the sessions
   running on this machine, for the sessions at work. It never opens the key
@@ -106,8 +111,8 @@ claude plugin validate <path to the plugin>
 
 For this one that lists three hooks (`session.start`, to register the command
 and start its timer; `command.run`, for `/board`; `ui.render`, to draw its own
-pane) and these calls: `$.process.run` to run the reader, `$.clock` for the
-timer, `$.ui` and `$.state` for the pane. It hooks no tool call and no prompt,
+pane) and these calls: `$.command.register` for `/board`, `$.process.run` to run
+the reader, `$.clock` for the timer, `$.ui` and `$.state` for the pane. It hooks no tool call and no prompt,
 and never sees or changes your conversation.
 
 ## How things are counted
@@ -142,7 +147,10 @@ and never sees or changes your conversation.
 - **A rebase or amend moves commits.** The copies keep their author dates, so
   they land where the work was done, but the old ones are no longer on any
   branch and drop out of the count.
+- **Two repos with the same folder name are one project.** `~/Projects/web`
+  and `~/Projects/work/web` share a name, a colour and their counts.
 - **Charts need the desktop app.** There are none in a terminal, in VS Code or
   on mobile.
+- **Built on Linux.** macOS should work; Windows paths are untested.
 - **Mods are early access.** A Claude Code update can change the API this
   plugin is written against.
