@@ -11,6 +11,7 @@ release time.
 | [`usage-guard`](plugins/usage-guard/README.md) | Per-chat budgets enforced against your account's real rate-limit gauges (5-hour, weekly, extra usage, per-model). |
 | [`model-advisor`](plugins/model-advisor/README.md) | Tells you whether switching models would actually help your current rate limits — informational only, never denies anything. |
 | [`reflect`](plugins/reflect/README.md) | `/reflect` opens a pane that charts how you use Claude Code: activity, projects, models and tools, computed from your local history. A mod, so it needs Claude Code 2.1.287 or newer. |
+| [`night`](plugins/night/README.md) | Night mode: arm a window and up to four Claude Code sessions work through a queue built from your own plans while the machine is dark and quiet, behind a sandbox, a push block and a guard hook; watchers bring back anything that dies, and a recap waits in the morning. Linux with systemd; the `/night` pane is a mod. |
 
 ## Installation
 
@@ -36,11 +37,17 @@ TacosPlugins/
 │   │   ├── .claude-plugin/plugin.json
 │   │   ├── hooks/, commands/, bin/
 │   │   └── lib/                      # vendored copy of packages/core (tracked in git)
-│   └── reflect/                      # a mod; standalone, so no lib/
+│   ├── reflect/                      # a mod; standalone, so no lib/
+│   │   ├── .claude-plugin/plugin.json
+│   │   ├── hooks/                    # the mod: pane, tabs, charts
+│   │   ├── indexer/                  # the Node program that reads the history
+│   │   └── types/, test/
+│   └── night/                        # systemd services and a mod; standalone, so no lib/
 │       ├── .claude-plugin/plugin.json
-│       ├── hooks/                    # the mod: pane, tabs, charts
-│       ├── indexer/                  # the Node program that reads the history
-│       ├── types/, test/
+│       ├── bin/                      # night.mjs (the CLI the units call) and guard.mjs (the worker hook)
+│       ├── engine/                   # queue, planner, workers, watchers, dusk and dawn, recap
+│       ├── hooks/                    # the mod: the /night pane
+│       └── types/, test/
 └── scripts/release.mjs               # copies packages/core into each plugin that uses it
 ```
 
