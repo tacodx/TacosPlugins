@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { nightFiles, nightPaths } from '../engine/config.mjs'
 import { readJsonl, writeJson } from '../engine/fsx.mjs'
@@ -31,7 +32,8 @@ function fakeMachine(t, { now = EVENING } = {}) {
     notify: async (text) => { calls.push(['notify', text]) },
   }
   const guardOk = join(home, 'guard-ok.sh')
-  writeFileSync(guardOk, '#!/bin/sh\necho \'{"hookSpecificOutput":{"permissionDecision":"deny"}}\'\n')
+  // A stand-in guard: denies a push, allows everything else.
+  writeFileSync(guardOk, '#!/bin/sh\nif grep -q "git push"; then echo \'{"hookSpecificOutput":{"permissionDecision":"deny"}}\'; fi\n')
   chmodSync(guardOk, 0o755)
   return { home, paths, m, calls, set: (ms) => { clock = ms }, guardOk }
 }
@@ -42,7 +44,7 @@ const has = (calls, ...words) => calls.some((c) => words.every((w) => c.includes
 async function armAndRun(s) {
   await arm(s.paths, s.m)
   s.set(s.m.now() + 11_000)
-  await dusk(s.paths, s.m, { node: process.execPath, guard: s.guardOk })
+  await dusk(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
 }
 
 test('arming in the evening sets exact UTC timers for tonight and enables them', async (t) => {
@@ -71,7 +73,7 @@ test('dusk runs every step on its own, records it, and starts the night\'s servi
   const s = fakeMachine(t)
   await arm(s.paths, s.m)
   s.set(Date.parse('2026-03-10T22:30:00Z'))
-  await dusk(s.paths, s.m, { node: process.execPath, guard: s.guardOk })
+  await dusk(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   const current = readCurrent(s.paths)
   assert.equal(current.phase, 'night')
   assert.equal(current.unsafe, null)
@@ -102,7 +104,7 @@ test('a dusk that fires after the window (a reboot in the afternoon) does nothin
   const s = fakeMachine(t)
   await arm(s.paths, s.m)
   s.set(Date.parse('2026-03-11T13:00:00Z'))
-  await dusk(s.paths, s.m, { guard: s.guardOk })
+  await dusk(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   assert.equal(readCurrent(s.paths).phase, 'idle')
   assert.ok(!has(s.calls, 'start', 'night.target'))
 })
@@ -111,16 +113,16 @@ test('the keeper runs a missed dusk, keeps the target up, stops spare workers an
   const s = fakeMachine(t)
   await arm(s.paths, s.m)
   s.set(Date.parse('2026-03-10T23:00:00Z'))
-  await keep(s.paths, s.m, { guard: s.guardOk })
+  await keep(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   assert.equal(readCurrent(s.paths).phase, 'night')
   s.calls.length = 0
-  await keep(s.paths, s.m, { guard: s.guardOk })
+  await keep(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   assert.ok(has(s.calls, 'start', 'night.target'))
   assert.ok(has(s.calls, 'stop', 'night-worker@3.service'))
   assert.ok(has(s.calls, 'restart', 'night-medic.service')) // no medic beat yet
   s.set(Date.parse('2026-03-11T05:40:00Z'))
   let recapped = false
-  await keep(s.paths, s.m, { guard: s.guardOk, recap: async () => { recapped = true } })
+  await keep(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk, recap: async () => { recapped = true } })
   assert.equal(readCurrent(s.paths).phase, 'day')
   assert.ok(recapped)
   assert.ok(has(s.calls, 'run', 'kscreen-doctor', '--dpms', 'on'))
@@ -159,7 +161,7 @@ test('stop writes stopped first, ends the services, restores the machine, and gi
   assert.equal(readQueue(s.paths, date).items[0].status, 'open')
   assert.ok(!existsSync(join(s.paths.units, 'night-dawn.timer')))
   s.calls.length = 0
-  await keep(s.paths, s.m, { guard: s.guardOk })
+  await keep(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   assert.equal(s.calls.length, 0)
 })
 
@@ -226,7 +228,7 @@ test('a dawn timer and a keeper that both see the window end run dawn once betwe
   s.calls.length = 0
   let recaps = 0
   const recap = async () => { recaps++ }
-  await Promise.all([dawn(s.paths, s.m, { recap }), keep(s.paths, s.m, { guard: s.guardOk, recap })])
+  await Promise.all([dawn(s.paths, s.m, { recap }), keep(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk, recap })])
   assert.equal(s.calls.filter((c) => c.includes('kscreen-doctor')).length, 1)
   assert.equal(recaps, 1)
   assert.equal(readCurrent(s.paths).phase, 'day')
@@ -243,8 +245,29 @@ test('a Stop that lands during dusk keeps the later steps and the services from 
     if (argv.includes('night-power.service')) writeCurrent(s.paths, { ...readCurrent(s.paths), phase: 'stopped' })
     return fast(argv)
   }
-  await dusk(s.paths, s.m, { node: process.execPath, guard: s.guardOk })
+  await dusk(s.paths, s.m, { node: '/bin/sh', guard: s.guardOk })
   assert.equal(readCurrent(s.paths).phase, 'stopped')
   assert.ok(!has(s.calls, 'start', 'night.target'))
   assert.ok(!has(s.calls, 'run', 'qdbus-qt6'))
+})
+
+test('a guard that cannot start fails the canary: exit 2 alone is not a deny', async (t) => {
+  const s = fakeMachine(t)
+  const broken = join(s.home, 'broken.sh')
+  writeFileSync(broken, '#!/bin/sh\nexit 1\n')
+  const problems = await canary({ node: '/bin/sh', guard: broken, scratch: s.home })
+  assert.ok(problems.includes('the guard hook did not deny a git push'))
+})
+
+test('the canary passes with the real guard: a push denied, a read allowed, no credentials, no ssh', async (t) => {
+  const s = fakeMachine(t)
+  writeFileSync(join(s.home, '.keep'), '')
+  const guard = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'guard.mjs')
+  assert.deepEqual(await canary({ node: process.execPath, guard, scratch: s.home }), [])
+})
+
+test('with a working guard the night is not marked unsafe', async (t) => {
+  const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
+  await armAndRun(s)
+  assert.equal(readCurrent(s.paths).unsafe, null)
 })

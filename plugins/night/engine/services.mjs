@@ -95,6 +95,7 @@ export function healthTurn(paths, m) {
   let lastActionAt = null
   let clearSince = null
   let pumpLowCount = 0
+  let pumpUnknown = 0
   let hotHandled = false
   return async ({ files }) => {
     const { config } = loadConfig(paths)
@@ -105,7 +106,7 @@ export function healthTurn(paths, m) {
     clearSince = bad ? null : clearSince ?? now
     const before = readJson(files.health, null)
     const line = v.blockers[0]?.text ?? v.warnings[0]?.text ?? 'All fine.'
-    writeJson(files.health, { at: now, sample, verdict: v, line })
+    writeJson(files.health, { at: now, sample, verdict: v, line, fansHeldDay: before?.fansHeldDay === true })
     for (const b of v.blockers) if (!before?.verdict?.blockers?.some((x) => x.code === b.code)) addEvent(files, 'health.blocker', { code: b.code, text: b.text }, now)
     if (v.thrash && !before?.verdict?.thrash) addEvent(files, 'health.thrash', {}, now)
 
@@ -124,22 +125,39 @@ export function healthTurn(paths, m) {
     }
 
     // The pump: under its floor the Day mode goes on; still low a minute later, every worker pauses.
-    const rpm = fans.pumpRpm(sample.sensors ?? readSensors(m), config.hardware.fans.pumpChannel)
-    if (rpm !== null && rpm < config.hardware.fans.pumpMinRpm) {
-      pumpLowCount++
-      addEvent(files, 'pump.low', { rpm }, now)
-      if (pumpLowCount === 1) await fans.day({ config, home: paths.home, fetch: m.fetch, run: m.run, sleep: m.sleep, readFile: m.readFile })
-      if (pumpLowCount >= 3) {
-        writeJson(pausedFile, { slots: Array.from({ length: config.sessions }, (_, i) => i + 1), at: {}, pump: true })
-        await m.notify(`The pump reads ${rpm} RPM. Night mode paused every worker.`)
+    // Only when the owner set a pump device: without one there is nothing to watch.
+    const fanCtx = { config, home: paths.home, fetch: m.fetch, run: m.run, sleep: m.sleep, readFile: m.readFile }
+    const holdDay = () => writeJson(files.health, { ...readJson(files.health, {}), fansHeldDay: true })
+    if (config.hardware.fans.pumpDevice) {
+      const rpm = fans.pumpRpm(readSensors(m), config.hardware.fans.pumpChannel)
+      if (rpm === null) {
+        pumpUnknown++
+        if (pumpUnknown === 4) addEvent(files, 'pump.unknown', { text: 'The pump speed could not be read for two minutes.' }, now)
+      } else {
+        pumpUnknown = 0
       }
-    } else {
-      pumpLowCount = 0
+      if (rpm !== null && rpm < config.hardware.fans.pumpMinRpm) {
+        pumpLowCount++
+        addEvent(files, 'pump.low', { rpm }, now)
+        if (pumpLowCount === 1) {
+          await fans.day(fanCtx)
+          holdDay()
+        }
+        if (pumpLowCount >= 3) {
+          writeJson(pausedFile, { slots: Array.from({ length: config.sessions }, (_, i) => i + 1), at: {}, pump: true })
+          await m.notify(`The pump reads ${rpm} RPM. Night mode paused every worker.`)
+        }
+      } else if (rpm !== null) {
+        pumpLowCount = 0
+      }
     }
     if (v.hot && !hotHandled) {
       hotHandled = true
       addEvent(files, 'health.hot', { cpuC: sample.cpuC, gpuJunctionC: sample.gpuJunctionC }, now)
-      await fans.day({ config, home: paths.home, fetch: m.fetch, run: m.run, sleep: m.sleep, readFile: m.readFile })
+      await fans.day(fanCtx)
+      holdDay()
+    } else if (!v.hot) {
+      hotHandled = false
     }
     return 30_000
   }

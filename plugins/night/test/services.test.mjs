@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { nightFiles, nightPaths } from '../engine/config.mjs'
 import { readJson, readJsonl, writeJson } from '../engine/fsx.mjs'
-import { conductorTurn, medicTurn, usageTurn } from '../engine/services.mjs'
+import { conductorTurn, healthTurn, medicTurn, usageTurn } from '../engine/services.mjs'
 import { beat, writeCurrent } from '../engine/state.mjs'
 import { tempDir } from './helpers.mjs'
 
@@ -103,4 +103,28 @@ test('the conductor plans the first project that needs it and records a failed p
   const failing = async () => JSON.stringify({ is_error: true, result: 'overloaded' })
   await conductorTurn(s.paths, s.m, { call: failing, run })({ current: s.current, files: s.files })
   assert.ok(readJsonl(s.files.events).some((e) => e.kind === 'planner.failed'))
+})
+
+test('a pump under its floor brings the Day fans back, holds them, and after three readings pauses every worker', async (t) => {
+  const s = setup(t)
+  writeJson(s.paths.config, { sessions: 2, hardware: { fans: { pumpDevice: 'nct6687' } } })
+  const sensors = { 'nct6687-isa-0a20': { Adapter: 'ISA adapter', fan1: { fan1_input: 300 } } }
+  s.m.runSync = (argv) => (argv[0] === 'sensors' ? JSON.stringify(sensors) : '')
+  s.m.fetch = async () => { throw new Error('no network') }
+  s.m.sleep = async () => {}
+  const notes = []
+  s.m.notify = async (text) => { notes.push(text) }
+  const turn = healthTurn(s.paths, s.m)
+  for (let i = 0; i < 3; i++) await turn({ files: s.files })
+  assert.equal(readJsonl(s.files.events).filter((e) => e.kind === 'pump.low').length, 3)
+  assert.equal(readJson(s.files.health).fansHeldDay, true)
+  assert.deepEqual(readJson(join(s.files.dir, 'paused.json')).slots, [1, 2])
+  assert.match(notes[0], /300 RPM/)
+})
+
+test('without a pump device set, the pump is not watched at all', async (t) => {
+  const s = setup(t)
+  s.m.runSync = () => { throw new Error('sensors must not be read for the pump') }
+  await healthTurn(s.paths, s.m)({ files: s.files })
+  assert.equal(readJsonl(s.files.events).filter((e) => e.kind.startsWith('pump')).length, 0)
 })

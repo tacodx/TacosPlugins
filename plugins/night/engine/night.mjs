@@ -36,9 +36,10 @@ export function machine({ env = process.env } = {}) {
     now: Date.now,
     zone: env.TZ || systemTimeZone(),
     run: (argv, options) => runCommand(argv, { env, ...options }),
+    // `sensors` exits 1 when one chip fails yet prints every other reading, so output wins over the exit code.
     runSync: (argv) => {
       const r = spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', timeout: 10_000, env })
-      if (r.status !== 0) throw new Error(`${argv[0]} exited ${r.status}`)
+      if (!r.stdout) throw new Error(`${argv[0]} printed nothing (exit ${r.status})`)
       return r.stdout
     },
     systemctl: (...args) => runCommand(['systemctl', '--user', ...args], { env, timeoutMs: 90_000 }),
@@ -138,6 +139,10 @@ async function runSteps(paths, which, steps, ctx, m, { only } = {}) {
 /** Runs again the named steps of dusk or dawn that failed (the medic calls this). */
 export async function rerunSteps(paths, m, which, only) {
   const { config } = loadConfig(paths)
+  const current = readCurrent(paths)
+  // Health switched the fans to Day for heat or the pump: a retried dusk must not put Night back.
+  if (which === 'dusk' && current.date && readJson(nightFiles(paths, current.date).health, {})?.fansHeldDay) only = only.filter((n) => n !== 'fans')
+  if (!only.length) return
   await runSteps(paths, which, which === 'dusk' ? DUSK_STEPS : DAWN_STEPS, hardwareCtx(paths, config, m), m, { only })
 }
 
@@ -152,17 +157,21 @@ export function failedSteps(current, which) {
  * Proves the walls hold before any worker starts: the guard hook denies a push,
  * and git with the worker environment cannot push. Returns the problems found.
  */
-export async function canary({ node, guard, run, scratch }) {
+export async function canary({ node, guard, scratch }) {
   const problems = []
-  const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin main' }, cwd: scratch, session_id: 'canary' })
-  const hook = spawnSync('sh', ['-c', `"${node}" "${guard}" || exit 2`], {
-    input,
+  const hookEnv = { ...process.env, NIGHT_WORKTREE: scratch, NIGHT_SCRATCH: scratch, NIGHT_PROTECTED: 'main', NIGHT_TEST_LOCK: '/tmp/night-tests.lock' }
+  const ask = (tool, input) => spawnSync('sh', ['-c', `"${node}" "${guard}" || exit 2`], {
+    input: JSON.stringify({ tool_name: tool, tool_input: input, cwd: scratch, session_id: 'canary' }),
     encoding: 'utf8',
-    timeout: 20_000,
-    env: { ...process.env, NIGHT_WORKTREE: scratch, NIGHT_SCRATCH: scratch, NIGHT_PROTECTED: 'main', NIGHT_TEST_LOCK: '/tmp/x' },
+    timeout: 60_000,
+    env: hookEnv,
   })
-  const denied = hook.status === 2 || /"permissionDecision"\s*:\s*"deny"/.test(hook.stdout ?? '')
-  if (!denied) problems.push('the guard hook did not deny a git push')
+  // A deny must be the guard's own answer: a guard that cannot even start also exits 2,
+  // and would then block every tool, reading included, all night.
+  const push = ask('Bash', { command: 'git push origin main' })
+  if (!/"permissionDecision"\s*:\s*"deny"/.test(push.stdout ?? '')) problems.push('the guard hook did not deny a git push')
+  const read = ask('Read', { file_path: join(scratch, '.keep') })
+  if (read.status !== 0 || /"permissionDecision"\s*:\s*"deny"/.test(read.stdout ?? '')) problems.push('the guard hook did not allow a harmless read')
   const { workerEnv } = await import('./claude.mjs')
   const env = workerEnv(process.env, { slot: 0, worktree: scratch, scratch, protectedBranches: ['main'], testLock: '/tmp/x', events: '/dev/null', decisions: '/dev/null' })
   // A throwaway repo with a GitHub remote: git must rewrite its push URL to the blocked host.
@@ -172,6 +181,10 @@ export async function canary({ node, guard, run, scratch }) {
   spawnSync('git', ['-C', repo, 'remote', 'add', 'canary', 'https://github.com/example/canary.git'], { encoding: 'utf8' })
   const url = spawnSync('git', ['-C', repo, 'remote', 'get-url', '--push', 'canary'], { encoding: 'utf8', env })
   if (!/night-blocked/.test(url.stdout ?? '')) problems.push('git with the worker environment still has a real push URL')
+  // And with no credential helper left, https has nothing to push with even where a pushurl skips the rewrite.
+  const helpers = spawnSync('git', ['-C', repo, 'config', '--get-all', 'credential.helper'], { encoding: 'utf8', env })
+  if ((helpers.stdout ?? '').split('\n').filter(Boolean).at(-1)) problems.push('git with the worker environment still has a credential helper')
+  if (env.GIT_SSH_COMMAND !== 'false') problems.push('ssh is not switched off for workers')
   return problems
 }
 

@@ -91,9 +91,10 @@ async function publishRecap(paths, files, config) {
   if (!claude) return null
   const url = config.artifact.url
   const prompt = url
-    ? `Use the Artifact tool only. First read the artifact ${url} (action "read"). Then publish the local file ${files.recapHtml} to that same artifact (action "publish", file_path "${files.recapHtml}", url "${url}"). Reply with only the artifact URL.`
-    : `Use the Artifact tool only. Publish the local file ${files.recapHtml} as a new artifact (action "publish", file_path "${files.recapHtml}", icon "moon", description "What the night's Claude Code sessions did, project by project"). Reply with only the artifact URL.`
-  const args = ['-p', prompt, '--model', config.models.publisher, '--tools', 'Artifact', '--permission-mode', 'bypassPermissions',
+    ? `Read the local file ${files.recapHtml} with the Read tool. Then, with the Artifact tool, read the artifact ${url} (action "read") and publish the local file ${files.recapHtml} to that same artifact (action "publish", file_path "${files.recapHtml}", url "${url}"). Reply with only the artifact URL.`
+    : `Read the local file ${files.recapHtml} with the Read tool. Then publish it with the Artifact tool as a new artifact (action "publish", file_path "${files.recapHtml}", icon "moon", description "What the night's Claude Code sessions did, project by project"). Reply with only the artifact URL.`
+  // Read too: the Artifact tool wants the page read before it is published. Nothing else: the page holds text workers wrote.
+  const args = ['-p', prompt, '--model', config.models.publisher, '--tools', 'Artifact,Read', '--permission-mode', 'bypassPermissions',
     '--strict-mcp-config', '--setting-sources', 'local', '--disable-slash-commands', '--no-session-persistence', '--no-chrome', '--output-format', 'json']
   try {
     const out = JSON.parse(await callClaude(claude, files.dir)(args))
