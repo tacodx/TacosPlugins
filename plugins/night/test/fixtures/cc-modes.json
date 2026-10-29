@@ -1,0 +1,106 @@
+{
+  "modes": [
+    {
+      "uid": "d0d0d0d0-0000-4000-8000-000000000001",
+      "name": "Day",
+      "device_settings": [
+        [
+          "0b0a4d0000000000000000000000000000000000000000000000000000000000",
+          [
+            {
+              "channel_name": "fan1",
+              "speed_fixed": 50,
+              "profile_uid": null,
+              "lighting": null,
+              "lcd": null,
+              "pwm_mode": null,
+              "reset_to_default": null
+            },
+            {
+              "channel_name": "fan2",
+              "speed_fixed": null,
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000a1",
+              "lighting": null,
+              "lcd": null,
+              "pwm_mode": null,
+              "reset_to_default": null
+            },
+            {
+              "channel_name": "fan6",
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000a2"
+            },
+            {
+              "channel_name": "fan7",
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000a2"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "uid": "e0e0e0e0-0000-4000-8000-000000000002",
+      "name": "Night",
+      "device_settings": [
+        [
+          "0b0a4d0000000000000000000000000000000000000000000000000000000000",
+          [
+            {
+              "channel_name": "fan1",
+              "speed_fixed": 50,
+              "profile_uid": null,
+              "lighting": null,
+              "lcd": null,
+              "pwm_mode": null,
+              "reset_to_default": null
+            },
+            {
+              "channel_name": "fan2",
+              "speed_fixed": null,
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000b1",
+              "lighting": null,
+              "lcd": null,
+              "pwm_mode": null,
+              "reset_to_default": null
+            },
+            {
+              "channel_name": "fan6",
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000b2"
+            },
+            {
+              "channel_name": "fan7",
+              "profile_uid": "a0a0a0a0-0000-4000-8000-0000000000b2"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "uid": "f0f0f0f0-0000-4000-8000-000000000003",
+      "name": "Loud",
+      "device_settings": [
+        [
+          "06b0000000000000000000000000000000000000000000000000000000000000",
+          [
+            {
+              "channel_name": "fan1",
+              "speed_fixed": 80
+            }
+          ]
+        ],
+        [
+          "0b0a4d0000000000000000000000000000000000000000000000000000000000",
+          [
+            {
+              "channel_name": "fan1",
+              "speed_fixed": 100
+            },
+            {
+              "channel_name": "fan2",
+              "speed_fixed": 100
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

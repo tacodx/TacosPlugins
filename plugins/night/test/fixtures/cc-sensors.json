@@ -1,0 +1,41 @@
+{
+  "k10temp-pci-00c3": {
+    "Adapter": "PCI adapter",
+    "Tctl": {
+      "temp1_input": 44.5
+    }
+  },
+  "amdgpu-pci-0300": {
+    "Adapter": "PCI adapter",
+    "fan1": {
+      "fan1_input": 0,
+      "fan1_min": 0,
+      "fan1_max": 3200
+    },
+    "edge": {
+      "temp1_input": 41
+    }
+  },
+  "nct6687-isa-0a20": {
+    "Adapter": "ISA adapter",
+    "+12V": {
+      "in0_input": 12.05
+    },
+    "CPU Fan": {
+      "fan1_input": 1650,
+      "fan1_min": 1500,
+      "fan1_max": 1900
+    },
+    "Pump Fan": {
+      "fan2_input": 900,
+      "fan2_min": 800,
+      "fan2_max": 1600
+    },
+    "System Fan #4": {
+      "fan6_input": 640
+    },
+    "CPU": {
+      "temp1_input": 45
+    }
+  }
+}

@@ -1,0 +1,187 @@
+{
+  "profiles": [
+    {
+      "uid": "0",
+      "name": "Unmanaged",
+      "p_type": "Default",
+      "speed_fixed": null,
+      "speed_profile": [],
+      "temp_source": null,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "a0a0a0a0-0000-4000-8000-0000000000a1",
+      "name": "radDay",
+      "p_type": "Graph",
+      "speed_fixed": null,
+      "speed_profile": [
+        [
+          0,
+          30
+        ],
+        [
+          50,
+          30
+        ],
+        [
+          70,
+          60
+        ],
+        [
+          85,
+          100
+        ]
+      ],
+      "temp_source": {
+        "temp_name": "temp1",
+        "device_uid": "0c00000000000000000000000000000000000000000000000000000000000000"
+      },
+      "temp_min": 0,
+      "temp_max": 100,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "a0a0a0a0-0000-4000-8000-0000000000a2",
+      "name": "caseDay",
+      "p_type": "Graph",
+      "speed_fixed": null,
+      "speed_profile": [
+        [
+          0,
+          20
+        ],
+        [
+          50,
+          35
+        ],
+        [
+          80,
+          90
+        ]
+      ],
+      "temp_source": {
+        "temp_name": "temp1",
+        "device_uid": "0c00000000000000000000000000000000000000000000000000000000000000"
+      },
+      "temp_min": 0,
+      "temp_max": 100,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "a0a0a0a0-0000-4000-8000-0000000000b1",
+      "name": "radNight",
+      "p_type": "Graph",
+      "speed_fixed": null,
+      "speed_profile": [
+        [
+          0,
+          25
+        ],
+        [
+          50,
+          25
+        ],
+        [
+          70,
+          60
+        ],
+        [
+          85,
+          100
+        ]
+      ],
+      "temp_source": {
+        "temp_name": "temp1",
+        "device_uid": "0c00000000000000000000000000000000000000000000000000000000000000"
+      },
+      "temp_min": 0,
+      "temp_max": 100,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "a0a0a0a0-0000-4000-8000-0000000000b2",
+      "name": "caseNight",
+      "p_type": "Graph",
+      "speed_fixed": null,
+      "speed_profile": [
+        [
+          0,
+          25
+        ],
+        [
+          60,
+          25
+        ],
+        [
+          80,
+          90
+        ]
+      ],
+      "temp_source": {
+        "temp_name": "temp1",
+        "device_uid": "0c00000000000000000000000000000000000000000000000000000000000000"
+      },
+      "temp_min": 0,
+      "temp_max": 100,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "c0c0c0c0-0000-4000-8000-0000000000c1",
+      "name": "pumpSixty",
+      "p_type": "Fixed",
+      "speed_fixed": 60,
+      "speed_profile": [],
+      "temp_source": null,
+      "temp_min": null,
+      "temp_max": null,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "c0c0c0c0-0000-4000-8000-0000000000c2",
+      "name": "pumpForty",
+      "p_type": "Fixed",
+      "speed_fixed": 40,
+      "speed_profile": [],
+      "temp_source": null,
+      "temp_min": null,
+      "temp_max": null,
+      "function_uid": "0",
+      "member_profile_uids": [],
+      "mix_function_type": null,
+      "offset_profile": []
+    },
+    {
+      "uid": "c0c0c0c0-0000-4000-8000-0000000000c3",
+      "name": "pumpMix",
+      "p_type": "Mix",
+      "speed_fixed": null,
+      "speed_profile": [],
+      "temp_source": null,
+      "function_uid": "0",
+      "member_profile_uids": [
+        "c0c0c0c0-0000-4000-8000-0000000000c1",
+        "a0a0a0a0-0000-4000-8000-0000000000a1"
+      ],
+      "mix_function_type": "Max",
+      "offset_profile": []
+    }
+  ]
+}

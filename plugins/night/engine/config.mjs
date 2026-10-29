@@ -79,6 +79,7 @@ export const DEFAULTS = Object.freeze({
       dayMode: 'Day',
       nightMode: 'Night',
       pumpChannel: 'fan1',
+      pumpDevice: null,
       pumpMinDuty: 50,
       pumpMinRpm: 1300,
     },
