@@ -86,7 +86,16 @@ export const DEFAULTS = Object.freeze({
   },
   binaries: { claude: null, node: null },
   models: { worker: null, planner: 'sonnet', publisher: 'haiku' },
-  worker: { memoryHigh: '5G', memoryMax: '6G', silentMinutes: 20, itemsPerSession: 6 },
+  worker: {
+    memoryHigh: '5G',
+    memoryMax: '6G',
+    silentMinutes: 20,
+    itemsPerSession: 6,
+    // Package caches the sandbox lets a worker write to, so installs and test browsers work.
+    cacheDirs: ['~/.npm', '~/.cache', '~/.local/share/pnpm', '~/.bun'],
+    // Extra paths a worker may not read or write, on top of the guard's own list.
+    secrets: [],
+  },
   health: {
     swapBlockPct: 95, psiFullAvg60: 5, diskWarnGb: 8, diskBlockGb: 3, tmpBlockPct: 75, cpuHotC: 85, gpuHotC: 100,
   },

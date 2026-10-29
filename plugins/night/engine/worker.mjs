@@ -189,7 +189,7 @@ export async function workerTurn(slot, { paths, deps }) {
     testLock: place.testLock,
     events: files.events,
     decisions: place.decisions,
-    secrets: config.worker.secrets ?? [],
+    secrets: (config.worker.secrets ?? []).map((d) => d.replace(/^~(?=\/)/, paths.home)),
   })
   const addDirs = [place.scratch, ...(config.worker.cacheDirs ?? []).map((d) => d.replace(/^~(?=\/)/, paths.home))]
   const args = workerArgs({

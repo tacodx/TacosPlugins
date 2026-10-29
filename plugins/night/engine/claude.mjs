@@ -33,7 +33,7 @@ const PUSH_BLOCK = ['https://', 'http://', 'git@', 'ssh://', 'git://']
 /** The environment of a worker's Claude session. */
 export function workerEnv(base, { slot, worktree, scratch, protectedBranches, testLock, events, decisions, secrets = [] }) {
   const env = { ...base }
-  for (const key of ['DISPLAY', 'WAYLAND_DISPLAY', 'SSH_AUTH_SOCK', 'GIT_DIR', 'GIT_WORK_TREE', 'CLAUDECODE']) delete env[key]
+  for (const key of ['DISPLAY', 'WAYLAND_DISPLAY', 'SSH_AUTH_SOCK', 'GIT_DIR', 'GIT_WORK_TREE', 'CLAUDECODE', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN']) delete env[key]
   for (const key of Object.keys(env)) if (key.startsWith('GIT_CONFIG_')) delete env[key]
   Object.assign(env, {
     NIGHT_WORKER: '1',
