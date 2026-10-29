@@ -101,7 +101,9 @@ test('/board opens the pane and runs the reader', async ($, on) => {
   expect(runs[0].argv[0]).toBe('node')
   expect(runs[0].argv[1]).toMatch(/\/reader\/cli\.mjs$/)
   expect(runs[0].argv.slice(2)).toEqual(['view'])
-  expect(runs[0].init).toEqual({ timeoutMs: 120000 })
+  expect(runs[0].init.timeoutMs).toBe(150000)
+  // Run from the plugin's own folder, never the session's, which may be a worktree that is gone.
+  expect(runs[0].init.cwd).toBe(runs[0].argv[1].replace(/\/reader\/cli\.mjs$/, ''))
 })
 
 test('a pane that cannot be placed says why', async ($, on) => {
@@ -236,6 +238,13 @@ test('when Node cannot be started the pane says what the board needs', async ($,
   const ui = await opened($, on, () => ({ deny: 'spawn node ENOENT' }))
 
   expect((await ui.find({ key: 'problem' }))?.text).toMatch(/needs Node 22 or newer/)
+})
+
+test('a reader that runs out of time says so, and does not blame Node', async ($, on) => {
+  const ui = await opened($, on, () => ({ deny: 'the command was still running after 150000 ms' }))
+
+  expect((await ui.find({ key: 'problem' }))?.text).toMatch(/did not finish within two and a half minutes/)
+  expect((await ui.find({ key: 'problem' }))?.text).not.toMatch(/Node/)
 })
 
 test('a failed refresh keeps the last good board on screen', async ($, on) => {

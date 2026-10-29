@@ -26,6 +26,10 @@ const error = atom({ plugin: 'board', key: 'error' } as const, null)
 // Which refresh was started last. An older one that finishes later must not
 // put its answer over a newer one's.
 let newest = 0
+// Refreshes this copy of the module has under way. Kept here, not in $.state:
+// a refresh cut off by a reload never finishes, and its 'loading' must not
+// keep the reloaded module's timer from refreshing.
+let running = 0
 // When the last refresh started. A reload sets it back to 0, so a pane that
 // stayed open through the reload is refreshed at the next tick.
 let startedAt = 0
@@ -53,15 +57,28 @@ function readRun(ran: { exitCode: number; stdout: string; stderr: string; isStdo
 
 async function refresh($: EngineInterface): Promise<void> {
   const mine = (newest += 1)
+  running += 1
+  try {
+    await readNow(mine, $)
+  } finally {
+    running -= 1
+  }
+}
+
+/** One run of the reader, its View or its failure written to $.state unless a newer run has begun. */
+async function readNow(mine: number, $: EngineInterface): Promise<void> {
   startedAt = await $.clock.now()
   await update($, status, () => 'loading')
 
   let outcome: { view: View } | { reason: string }
   try {
-    outcome = readRun(await $.process.run(['node', `${$.plugin.root}/reader/cli.mjs`, 'view'], { timeoutMs: 120_000 }))
+    // From the plugin's own folder: the session's may be a worktree that is gone.
+    outcome = readRun(await $.process.run(['node', `${$.plugin.root}/reader/cli.mjs`, 'view'], { cwd: $.plugin.root, timeoutMs: 150_000 }))
   } catch (err) {
-    // The command could not be started, or ran past its two minutes.
-    outcome = { reason: `the reader could not be run. The board needs Node 22 or newer on your PATH. (${err instanceof Error ? err.message : String(err)})` }
+    const said = err instanceof Error ? err.message : String(err)
+    outcome = /timed out|time ?out|still running/i.test(said)
+      ? { reason: 'the reader did not finish within two and a half minutes. It tries again at the next refresh.' }
+      : { reason: `the reader could not be run. The board needs Node 22 or newer on your PATH. (${said})` }
   }
   if (mine !== newest) return
 
@@ -80,7 +97,7 @@ async function refresh($: EngineInterface): Promise<void> {
 /** Refreshes the pane while it is open, once the last refresh is as old as the settings allow. */
 async function tick($: EngineInterface): Promise<void> {
   const isOpen = (await $.ui.panes()).some((pane) => pane.id === PANE && pane.isPlaced)
-  if (!isOpen || (await read($, status)) === 'loading') return
+  if (!isOpen || running > 0) return
   const shown = await read($, view)
   const minutes = isView(shown) ? shown.refreshMinutes : DEFAULT_REFRESH_MINUTES
   // A few seconds early is on time: the ticks and the runs never line up exactly.
