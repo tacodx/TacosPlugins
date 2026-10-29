@@ -144,18 +144,18 @@ test('the plan: number and name per row, done rows struck and dimmed, a status b
     eyebrow: 'The plan',
     aside: '1 of 3 done',
     rows: [
-      { id: '1', name: 'Offer', note: 'Done 2026-10-27', done: true },
-      { id: '2', name: 'Design', note: 'Reopened 2026-10-28', done: false },
-      { id: 'B', name: 'Live board', note: '', done: false },
+      { id: '1', name: 'Sketch', note: 'Done 2026-03-01', done: true },
+      { id: '2', name: 'Prototype', note: 'Reopened 2026-03-04', done: false },
+      { id: 'W', name: 'Write docs', note: '', done: false },
     ],
   })
 
   assertCard(svg)
-  assert.match(svg, /<text class="done"[^>]*>Offer<\/text>/)
-  assert.ok(!svg.includes('Done 2026-10-27'))
-  assert.match(svg, /<text class="ink"[^>]*>Design<\/text>/)
-  assert.ok(svg.includes('>Reopened 2026-10-28</text>'))
-  assert.ok(svg.includes('>B</text>') && svg.includes('>Live board</text>'))
+  assert.match(svg, /<text class="done"[^>]*>Sketch<\/text>/)
+  assert.ok(!svg.includes('Done 2026-03-01'))
+  assert.match(svg, /<text class="ink"[^>]*>Prototype<\/text>/)
+  assert.ok(svg.includes('>Reopened 2026-03-04</text>'))
+  assert.ok(svg.includes('>W</text>') && svg.includes('>Write docs</text>'))
   assert.match(svg, /\.done\{[^}]*text-decoration:line-through/)
 })
 

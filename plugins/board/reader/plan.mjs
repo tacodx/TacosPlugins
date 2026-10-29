@@ -3,7 +3,7 @@
 // The table is the first one under the heading the config names (the first one
 // in the file when it names none). A row's first cell is its number and its
 // second its name; a row struck through (~~…~~) is done; a bold phrase that
-// opens the third cell is its status, as in "**Reopened 2026-10-28.** …".
+// opens the third cell is its status, as in "**Started 2026-03-02.** …".
 import { readFileSync, statSync } from 'node:fs'
 
 import { expandHome } from './config.mjs'
@@ -50,7 +50,7 @@ function cells(line) {
 
 const isStruck = (cell) => /^~~.*~~$/.test(cell.trim())
 
-/** The bold phrase a cell opens with, without its closing stop: "**Done 2026-10-27.** …" -> "Done 2026-10-27". */
+/** The bold phrase a cell opens with, without its closing stop: "**Done 2026-03-05.** …" -> "Done 2026-03-05". */
 function status(cell) {
   const match = /^(\*\*|__)(.+?)\1/.exec(cell.trim())
   return match ? plain(match[2]).replace(/[.,:;]+$/, '') : ''

@@ -14,43 +14,43 @@ Some words first.
 | --- | --- |
 | not | this one |
 
-## Sessions, in order
+## Steps, in order
 
 Intro text with a | pipe in it.
 
-| # | Session | What it decides or builds | Needs |
+| # | Step | What it decides or builds | Needs |
 | --- | --- | --- | --- |
-| ~~1~~ | ~~**Offer**~~ | **Done and signed off 2026-10-27.** Prices live in \`offer.json\` | |
-| 2 | **Design** | **Reopened 2026-10-28.** The system is in [DESIGN.md](DESIGN.md) | nothing |
-| 3 | **Build the site** | The rebuilt site, in the repo. **Step one is the copy** | 1, 2 |
-|~~G~~|~~**Mail and the paper trail**~~|**Done 2026-10-28.** Labels \\| filters|  |
-| N | **Night mode** | Idea, 2026-10-29: one command before sleep | nothing |
-| B | Live *board* | __Idea__, a pane beside the chat | nothing |
+| ~~1~~ | ~~**Sketch**~~ | **Done and agreed 2026-03-01.** The notes live in \`sketch.md\` | |
+| 2 | **Prototype** | **Reopened 2026-03-04.** The rules are in [RULES.md](RULES.md) | nothing |
+| 3 | **Build the tool** | The tool itself, in the repo. **Step one is the data** | 1, 2 |
+|~~K~~|~~**Keys and the backups**~~|**Done 2026-03-05.** Keys \\| backups|  |
+| L | **Launch** | Idea, 2026-03-06: one page and a post | nothing |
+| W | Write *docs* | __Idea__, a guide beside the tool | nothing |
 
-## Decided direction
+## Later
 
-| # | Session |
+| # | Step |
 | --- | --- |
 | 9 | **Later** |
 `
 
 test('the rows of the named section\'s table: number, name, done, and a short status', () => {
-  assert.deepEqual(parsePlan(DOC, 'Sessions, in order'), {
+  assert.deepEqual(parsePlan(DOC, 'Steps, in order'), {
     rows: [
-      { id: '1', name: 'Offer', done: true, note: 'Done and signed off 2026-10-27' },
-      { id: '2', name: 'Design', done: false, note: 'Reopened 2026-10-28' },
-      { id: '3', name: 'Build the site', done: false, note: '' },
-      { id: 'G', name: 'Mail and the paper trail', done: true, note: 'Done 2026-10-28' },
-      { id: 'N', name: 'Night mode', done: false, note: '' },
-      { id: 'B', name: 'Live board', done: false, note: 'Idea' },
+      { id: '1', name: 'Sketch', done: true, note: 'Done and agreed 2026-03-01' },
+      { id: '2', name: 'Prototype', done: false, note: 'Reopened 2026-03-04' },
+      { id: '3', name: 'Build the tool', done: false, note: '' },
+      { id: 'K', name: 'Keys and the backups', done: true, note: 'Done 2026-03-05' },
+      { id: 'L', name: 'Launch', done: false, note: '' },
+      { id: 'W', name: 'Write docs', done: false, note: 'Idea' },
     ],
   })
 })
 
 test('a section is found by its words, whatever the case, level or trailing colon', () => {
-  const doc = '### SESSIONS, IN ORDER:\n\n| # | Name |\n|:-:|---|\n| 1 | One |\n'
+  const doc = '### STEPS, IN ORDER:\n\n| # | Name |\n|:-:|---|\n| 1 | One |\n'
 
-  assert.deepEqual(parsePlan(doc, 'sessions, in order').rows, [{ id: '1', name: 'One', done: false, note: '' }])
+  assert.deepEqual(parsePlan(doc, 'steps, in order').rows, [{ id: '1', name: 'One', done: false, note: '' }])
 })
 
 test('with no section named, the first table is the plan', () => {
@@ -75,7 +75,7 @@ test('readPlan reads the file the config names, with ~ for home', (t) => {
   mkdirSync(join(home, 'docs'))
   writeFileSync(join(home, 'docs', 'plan.md'), DOC)
 
-  const plan = readPlan({ file: '~/docs/plan.md', section: 'Sessions, in order' }, home)
+  const plan = readPlan({ file: '~/docs/plan.md', section: 'Steps, in order' }, home)
 
   assert.equal(plan.file, join(home, 'docs', 'plan.md'))
   assert.equal(plan.rows.length, 6)

@@ -50,9 +50,9 @@ function view(over: Record<string, unknown> = {}) {
       done: 1,
       total: 3,
       rows: [
-        { id: '1', name: 'Offer', done: true, note: 'Done 2026-03-01' },
-        { id: '2', name: 'Design', done: false, note: 'Reopened 2026-03-08' },
-        { id: 'B', name: 'Live board', done: false, note: '' },
+        { id: '1', name: 'Sketch', done: true, note: 'Done 2026-03-01' },
+        { id: '2', name: 'Prototype', done: false, note: 'Reopened 2026-03-08' },
+        { id: 'W', name: 'Write docs', done: false, note: '' },
       ],
     },
     repos: { count: 9, unreadable: [] },
@@ -136,7 +136,7 @@ test('five cards in the order asked for, each a drawing within what an Svg may h
   expect(alts[1]).toMatch(/in the last 30 hours/)
   expect(alts[2]).toBe('Commits per project in the last 7 days: alpha 15, beta 6')
   expect(alts[3]).toMatch(/^Working now: /)
-  expect(alts[4]).toBe('1 of 3 done in the plan; open: 2 Design, B Live board')
+  expect(alts[4]).toBe('1 of 3 done in the plan; open: 2 Prototype, W Write docs')
   for (const svg of svgs) {
     const source = svg.props.source as string
     expect(source.startsWith('<svg ')).toBe(true)
@@ -161,7 +161,7 @@ test('the cards show the numbers, the sessions and the plan of the view', async 
   expect(cards).toMatch(/>alpha · working for 1 h 12 min</)
   expect(cards).toMatch(/>gamma · working for 5 min</)
   expect(cards).toMatch(/>2 OF 5 OPEN</)
-  expect(cards).toMatch(/<text class="done"[^>]*>Offer<\/text>/)
+  expect(cards).toMatch(/<text class="done"[^>]*>Sketch<\/text>/)
   expect(cards).toMatch(/>Reopened 2026-03-08</)
   expect(cards).toMatch(/>1 OF 3 DONE</)
   expect((await ui.find({ key: 'footnotes' }))?.text).toMatch(/Updated 12:40\. While open it refreshes every 3 min\. Settings: ~\/\.claude\/tacos\/board\/config\.json/)
@@ -204,7 +204,7 @@ test('on a terminal there are no drawings, only the board in words', async ($, o
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
   expect(await ui.find({ type: 'Text', text: /Today: 145 commits, 28,028 lines added\. Last 7 days: 382 commits in 11 projects\./ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Working now: Alpha · Build the thing \(alpha\), Gamma · Write it up \(gamma\)\./ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Plan: 1 of 3 done\. Open: 2 Design, B Live board\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Plan: 1 of 3 done\. Open: 2 Prototype, W Write docs\./ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /desktop app/ })).toBeDefined()
 })
 
