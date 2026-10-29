@@ -205,7 +205,7 @@ export async function workerTurn(slot, { paths, deps }) {
   const beatTimer = setInterval(() => beat(files, `worker-${slot}`, { state: 'working', item: item.id }), 30_000)
   beat(files, `worker-${slot}`, { state: 'working', item: item.id }, now)
   const run = await deps.runClaude({
-    claude: deps.claude,
+    claude: typeof deps.claude === 'function' ? deps.claude() : deps.claude,
     args,
     cwd: place.worktree,
     env,
