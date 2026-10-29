@@ -155,8 +155,6 @@ The date is the local date on which the night started. Personal paths, project n
   and the "to" after it (across midnight and daylight-saving changes), writes `current.json` as `armed`, and
   writes `night-dusk.timer` and `night-dawn.timer` with those exact instants and `Persistent=true`. `night disarm`
   removes them. `night start` is arm-and-dusk-now.
-- At "from", if there was keyboard or mouse input in the last five minutes, dusk waits ten minutes and shows a
-  notification instead; it gives up waiting after an hour and starts anyway.
 - `night install` writes every unit into `~/.config/systemd/user/` (pure text builders, absolute paths to node,
   claude and the plugin) and reloads systemd. `night uninstall` removes them and nothing else.
 
@@ -169,7 +167,7 @@ Each step is independent, logged as an event, retried by the medic up to three t
 | RGB | the configured "off" command | the configured "on" command |
 | Fans | activate the Night mode | activate the Day mode |
 | Power | start `night-power.service` (holds power-saver) | stop it |
-| Sleep | start `night-inhibit.service` (`systemd-inhibit --what=sleep`, so screens may still blank) | stop it |
+| Sleep | start `night-inhibit.service` (`systemd-inhibit --what=sleep`, so screens may still blank) | keep it: workers go on until Stop |
 | Screens | the powerdevil "Turn Off Screen" shortcut | `kscreen-doctor --dpms on` |
 | Services | start `night.target` | leave it running; workers go on |
 | Recap | | write and publish |
@@ -182,12 +180,11 @@ mode it reads it and refuses unless the pump channel is a fixed duty of at least
 pump's RPM and, if it is under 1300, activates the Day mode and raises an event. A request filter rejects any
 request whose path or body names the pump channel. All three are tested against a fake CoolerControl.
 
-`night fans setup` runs once, after the owner saves a CoolerControl token to a mode-600 file the pane names. It
-saves the current setup as the mode "Day", builds a "Night" mode that changes only the radiator fans (25 % up to
-50 °C, the existing curve above) and the case fans (25 % up to 60 °C, then the existing curve), checks both with
-the pump rule, and re-activates Day. If the API for building a mode is not usable, the pane instead shows a short
-guide for making the Night mode in CoolerControl's own UI; night then only activates it by name. Without a token
-the fan steps are skipped and the recap says so in one line.
+The owner makes the two modes once in CoolerControl's own UI, guided by the pane: "Day" is the current setup,
+"Night" changes only the radiator fans (25 % up to 50 °C, the existing curve above) and the case fans (25 % up to
+60 °C, then the existing curve). Night never builds or edits a mode; it only activates them by name, after the
+pump check, with a token the owner saves to a mode-600 file. Without a token or the modes, the fan steps are
+skipped and the recap says so in one line.
 
 ### 6.4 Projects, queue and progress
 
@@ -300,3 +297,78 @@ engine never needs the pane.
   kill a worker's Claude mid-item and see the same session resume; stop `night.target` and see the keeper bring it
   back; fake a full swap and a pressure spike and see a freeze and a thaw; fake a limit record and see the wait.
 - A real short night: a 20-minute window, two workers, dusk and dawn, a recap.
+
+## 8. What the review changed (2026-10-29, before any worker code)
+
+A critic read this spec adversarially and checked its claims on the machine. Three findings were blockers; all
+changes below are accepted and override the sections above where they differ.
+
+### 8.1 Walls below the hook
+
+The guard works on command text, so it cannot be the only wall. Push credentials are live on this machine (a `gh`
+credential helper), and a script or alias can push. Spikes on 2.1.308 confirmed each of these:
+
+- **Claude's Bash sandbox** (`sandbox.enabled`, `allowUnsandboxedCommands: false`) runs every worker command with
+  the file system read-only except the working directory, `/tmp` and directories given with `--add-dir`. A commit
+  in a git worktree still reaches the repo's `.git`. A write to the main checkout failed with "Read-only file
+  system". Workers get `--add-dir` for their scratch folder and the package caches only. Network still works
+  through the sandbox's proxy.
+- **Pushes fail in git itself**: workers run with `GIT_CONFIG_COUNT` entries setting
+  `url.night-blocked:.pushInsteadOf` for `https://`, `git@` and `ssh://`, and `GH_TOKEN=night-blocked`. A real
+  `git push` under these failed with exit 128.
+- **The hook fails closed**: its command is `sh -c '<node> <guard> || exit 2'`, and exit 2 blocks the call.
+- **A canary at dusk**: the exact hook command from the worker settings is fed a synthetic `git push` and must deny;
+  `git push` with the worker environment must fail. If either check fails, no worker starts.
+
+### 8.2 Workers do not inherit the owner's setup
+
+The owner's user settings carry a Stop hook that asks every session to edit his project notes, plugins with
+skills that ask questions, and claude-mem's observers. Workers run with `--setting-sources project,local
+--disable-slash-commands --strict-mcp-config`. A spike confirmed the worker then sees none of the owner's user
+instructions, plugins or skills. Attribution is off in the worker settings (`includeCoAuthoredBy: false`).
+Decisions a worker takes alone go to `nights/<date>/decisions.md`, outside the repo, so nothing private lands in
+a public repo.
+
+### 8.3 Memory pressure ends work instead of freezing it
+
+Freezing a worker frees no memory (zram pages stay in RAM), and a frozen worker would look dead to the medic.
+Instead:
+
+- Workers run in `night.slice` (`MemoryMax=18G` for all of them), each with `MemoryHigh`, `MemoryMax` and
+  `MemorySwapMax=0`, so the kernel ends a runaway test inside the night rather than letting the machine thrash.
+- Under a blocker or thrash, health marks the slot of the largest worker paused (`paused.json`). That worker ends
+  its Claude child and everything under it, reopens the item, and idles until health lifts the pause. The medic
+  and the keeper leave paused slots alone.
+- Workers get `TMPDIR` on disk in their scratch folder, so tests stop filling the RAM-backed `/tmp`.
+
+### 8.4 Smaller changes
+
+- Timers are enabled, not only started, and the keeper rewrites them from `current.json` on every run. Dusk does
+  nothing outside its window (a missed dusk fired at boot in the afternoon is skipped); dawn always restores.
+- `night-inhibit` runs until Stop. Stop writes `stopped` before it stops anything, so the keeper never restarts a
+  night that is ending.
+- Stop mid-item: each worker ends Claude, commits what is in its worktree as "work in progress at stop" on the
+  night branch, and the item goes back as partial. Clean night worktrees are removed at Stop; branches stay.
+- Worktrees live in `~/.local/share/night/worktrees/<date>/<project>`, outside `~/.claude` (Claude Code guards
+  that folder) and dated, so one night never meets another's tree. A stale `index.lock` is cleared when no git
+  process runs in the worktree.
+- The test lock waits at most nine minutes (`flock -w 540`), builds are serialised too, and workers run with
+  `CI=1`, `PW_TEST_HTML_REPORT_OPEN=never`, `GIT_EDITOR=true`, `GIT_SEQUENCE_EDITOR=true`, `EDITOR=true`,
+  `GIT_TERMINAL_PROMPT=0`, `SSH_ASKPASS_REQUIRE=never`, `GIT_SSH_COMMAND='ssh -oBatchMode=yes'`, `BROWSER=true`,
+  `npm_config_yes=true`, and without `DISPLAY` and `WAYLAND_DISPLAY`. The guard also denies `--no-verify`.
+- A desktop session holds its repo while it is busy, waiting on a dialog or limited (the app resumes it after the
+  reset). An idle or dead session does not: its project's work goes on, on a night branch cut from its branch.
+- Usage: overload, network and server errors back off (1, 5, 15 minutes); an item fails three times, then it is
+  parked; a login error stops every worker until the owner is back. No stop line by default (the owner's call); a
+  weekly reserve can be set.
+- **% done** comes from a task map the planner draws per project at its first planning of the night (the plan's
+  tasks, each judged done or not from the plan, its boxes and the commits). The map at dusk is frozen; % now is
+  the same tasks, with those a night item finished ticked. Tasks added during the night are counted apart.
+- The pump's RPM is read by health every 30 s. Under its floor night activates Day; if that is refused or the
+  pump stays low, every worker stops. The pump check follows a profile reference to its duty.
+- `NIGHT_WORKER=1` (set for every worker) makes `night` refuse every command that changes the night, so a worker
+  on this very repo cannot stop or rearm it.
+- The recap publisher runs with `--tools Artifact` only, because the page holds text workers wrote.
+- Recap counts commits with `--branches`, not `--all` (no stash).
+- Cut from v1: the idle wait at dusk (KDE Wayland does not report idle time), building fan modes through the
+  API, the hourly HTML recap (the pane reads the live view), and a third pane tab.
