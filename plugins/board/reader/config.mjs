@@ -5,7 +5,7 @@
 // git repo directly under ~/Projects, and every repo one level inside a folder
 // there that holds repos. After that the file is the person's and is only read.
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, isAbsolute, join } from 'node:path'
 
 export const CONFIG_FILE = 'config.json'
 const DEFAULT_REFRESH = 3
@@ -16,6 +16,9 @@ export class ConfigError extends Error {}
 export const expandHome = (path, home) => (path === '~' ? home : path.startsWith('~/') ? join(home, path.slice(2)) : path)
 
 export const isRepo = (dir) => existsSync(join(dir, '.git'))
+
+// A relative path would be read from whichever folder a session happens to run in.
+const isPinned = (path) => path === '~' || path.startsWith('~/') || isAbsolute(path)
 
 /** The folders directly in `dir`, by name, leaving out hidden ones. Empty when `dir` cannot be listed. */
 function folders(dir) {
@@ -54,12 +57,12 @@ function check(raw, file) {
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail('it must be an object')
   const { repos, plan = null, refreshMinutes = DEFAULT_REFRESH, authors = [] } = raw
-  if (!Array.isArray(repos) || !repos.every((each) => typeof each === 'string' && each !== '')) {
-    fail('"repos" must be a list of folders, such as ["~/Projects/*"]')
+  if (!Array.isArray(repos) || !repos.every((each) => typeof each === 'string' && isPinned(each))) {
+    fail('"repos" must be a list of folders from ~ or /, such as ["~/Projects/*"]')
   }
   if (plan !== null) {
     if (typeof plan !== 'object' || Array.isArray(plan)) fail('"plan" must be null or { "file": …, "section": … }')
-    if (typeof plan.file !== 'string' || plan.file === '') fail('"plan.file" must name a Markdown file')
+    if (typeof plan.file !== 'string' || !isPinned(plan.file)) fail('"plan.file" must name a Markdown file from ~ or /')
     if (plan.section !== undefined && plan.section !== null && typeof plan.section !== 'string') fail('"plan.section" must be a heading\'s words')
   }
   if (typeof refreshMinutes !== 'number' || !Number.isFinite(refreshMinutes) || refreshMinutes < 1 || refreshMinutes > 60) {
@@ -112,7 +115,7 @@ export function loadConfig(dataDir, home) {
 /**
  * The repos the patterns name, in their order, each once. A pattern is a repo's
  * folder, or a folder followed by `/*` for every repo directly inside it.
- * @returns {{ path: string, name: string }[]}
+ * @returns {{ path: string, name: string, real: string }[]} `real` the path with every link resolved
  */
 export function expandRepos(patterns, home) {
   const seen = new Set()
@@ -127,15 +130,14 @@ export function expandRepos(patterns, home) {
     }
     if (seen.has(real)) return
     seen.add(real)
-    repos.push({ path, name: basename(path) })
+    repos.push({ path, name: basename(path), real })
   }
   for (const pattern of patterns) {
-    const path = expandHome(pattern, home)
-    if (path.endsWith('/*')) {
-      const dir = path.slice(0, -2)
+    if (pattern.endsWith('/*') || pattern.endsWith('\\*')) {
+      const dir = expandHome(pattern.slice(0, -2), home)
       for (const name of folders(dir)) add(join(dir, name))
     } else {
-      add(path.replace(/\/+$/, ''))
+      add(expandHome(pattern, home).replace(/[\\/]+$/, ''))
     }
   }
   return repos

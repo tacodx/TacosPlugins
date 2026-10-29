@@ -105,6 +105,13 @@ test('a session is named by the repo it runs in, worktrees included', () => {
   assert.equal(nameOf(null), 'unknown')
 })
 
+test('a session in a repo reached through a link is named by that repo', () => {
+  const nameOf = projectNamer([{ path: '/home/u/Projects/alpha', name: 'alpha', real: '/data/projects/alpha' }])
+
+  assert.equal(nameOf('/data/projects/alpha/.claude/worktrees/calm-fox'), 'alpha')
+  assert.equal(nameOf('/home/u/Projects/alpha'), 'alpha')
+})
+
 test('workingNow prefers the list of running sessions and falls back to transcripts', (t) => {
   const repos = [{ path: '/w/alpha', name: 'alpha' }]
   const dir = registry(t, { '101.json': sessionEntry({ pid: 101, name: 'Alpha · Build', cwd: '/w/alpha/.claude/worktrees/x', statusUpdatedAt: NOW - 5 * MIN }) })

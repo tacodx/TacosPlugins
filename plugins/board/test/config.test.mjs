@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ConfigError, expandRepos, loadConfig } from '../reader/config.mjs'
@@ -83,6 +83,9 @@ test('each setting that has the wrong shape is named', (t) => {
     [{ repos: [], refreshMinutes: 0 }, /refreshMinutes/],
     [{ repos: [], refreshMinutes: 'often' }, /refreshMinutes/],
     [{ repos: [], authors: 'me@example.com' }, /authors/],
+    // A relative path would be read from whichever folder a session runs in.
+    [{ repos: ['Projects/*'] }, /repos/],
+    [{ repos: [], plan: { file: 'docs/PLAN.md' } }, /plan\.file/],
     [[], /an object/],
   ]
   for (const [value, message] of bad) {
@@ -111,5 +114,6 @@ test('patterns expand to the repos they name, in order, each once', (t) => {
     ['alpha-link', 'one', 'two', 'beta', 'hub', 'inner'],
   )
   assert.equal(repos[0].path, join(dir, 'Projects', 'group', 'alpha-link'))
+  assert.equal(repos[0].real, realpathSync(join(dir, 'Projects', 'alpha')))
   assert.ok(repos.every((repo) => existsSync(join(repo.path, '.git'))))
 })

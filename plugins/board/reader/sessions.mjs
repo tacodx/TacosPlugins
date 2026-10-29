@@ -194,12 +194,21 @@ export function readTranscripts(projectsDir, { now, windowMs = RECENT_MS }) {
   return found.sort((a, b) => b.at - a.at)
 }
 
-/** Names a folder by the repo it lies in (the deepest one, worktrees included), else by its own name. */
+/** A path with forward slashes and no slash at its end, for comparing. */
+const plainPath = (path) => path.replace(/\\/g, '/').replace(/\/+$/, '')
+
+/**
+ * Names a folder by the repo it lies in (the deepest one, worktrees included),
+ * else by its own name. A repo is known by its path and by its real path, so a
+ * session that reports a folder with its links resolved is still found.
+ */
 export function projectNamer(repos) {
-  const roots = repos.map(({ path, name }) => ({ path: path.replace(/\/+$/, ''), name })).sort((a, b) => b.path.length - a.path.length)
+  const roots = repos
+    .flatMap(({ path, name, real }) => [path, real].filter((each) => typeof each === 'string').map((each) => ({ path: plainPath(each), name })))
+    .sort((a, b) => b.path.length - a.path.length)
   return (cwd) => {
     if (typeof cwd !== 'string' || cwd === '') return 'unknown'
-    const folder = cwd.replace(/\/+$/, '')
+    const folder = plainPath(cwd)
     const root = roots.find(({ path }) => folder === path || folder.startsWith(`${path}/`))
     return root ? root.name : basename(folder) || 'unknown'
   }
