@@ -54,15 +54,22 @@ since 8 days ago, with `--numstat`. Each repo's result is cached under a hash of
 not. A commit counts when its author email is one the listed repos commit as
 (their `user.email`), or one listed under `authors`; a commit in two repos is
 counted once. Hour and day come from the author date in the local zone, so
-rebased copies land where the work was done. Lockfiles add no lines.
+rebased copies land where the work was done. Lockfiles add no lines. Git runs
+with lazy fetching off, and a partial clone (a promisor remote) is read without
+file contents, so the board never touches the network; its lines are not
+counted and the pane says so. A repo git cannot read keeps its earlier entry,
+and after 45 seconds the repos not yet read wait for the next refresh, so one
+hanging repo cannot run the reader into the pane's limit of two and a half
+minutes.
 
 **Colours.** Eight slots, the dark steps of the dataviz reference palette in
 its validated order, checked against this card's surface (`#161615`): every
 adjacent pair passes CVD separation and the normal-vision floor, all eight
-clear 3:1. The reader keeps a book, project to slot, in its cache. A project
-keeps its slot while no other active project holds it; a new one takes the
-lowest slot nobody in the book holds, else one a dormant project gives up.
-Past eight active projects the quietest are neutral and drawn as Other. The
+clear 3:1. The reader keeps a book, project to slot, in its cache. Only the
+eight busiest active projects are coloured; the rest are neutral and drawn as
+Other. A coloured project keeps its slot while no other coloured project holds
+it; one without a slot takes the lowest slot nobody in the book holds, else one
+held only by a project that is not coloured now, which gives it up. The
 hours card is one series in reflect's accent, which is not one of the eight.
 
 **Settings.** The repo is public, so no one's paths are in the code. The first
