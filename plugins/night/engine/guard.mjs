@@ -46,6 +46,7 @@ const R = {
 }
 
 const say = {
+  wallVar: (name) => `${name} holds one of the walls night workers run behind (the push block, the blocked tokens, ssh): leave it as it is.`,
   deploy: (name) => `${name} reaches live services: night work stays local, so note the deploy in DECISIONS.md for the owner.`,
   cloud: (name) => `${name} talks to live cloud accounts: night work stays local, so note what is needed in DECISIONS.md.`,
   privilege: (name) =>
@@ -688,7 +689,7 @@ function judgeBash(input, env, rewrite) {
   const quoted = /^[\w./-]+$/.test(env.testLock) ? env.testLock : `'${env.testLock.replaceAll("'", "'\\''")}'`
   return {
     decision: 'rewrite',
-    input: { ...input, command: `flock ${quoted} sh -c '${command.replaceAll("'", "'\\''")}'` },
+    input: { ...input, command: `flock -w 540 ${quoted} sh -c '${command.replaceAll("'", "'\\''")}'` },
     reason: R.rewrite,
   }
 }
@@ -788,11 +789,11 @@ function judgeWords(words, st, env, out, io = {}) {
   let i = 0
   while (i < argv.length && isAssignment(argv[i])) i++
   if (i === argv.length) {
-    for (const w of argv) setVar(st, w, env)
+    for (const w of argv) setVar(st, w, env, out)
     return null
   }
   const local = { ...st, vars: new Map(st.vars) }
-  for (const w of argv.slice(0, i)) setVar(local, w, env)
+  for (const w of argv.slice(0, i)) setVar(local, w, env, out)
   let runner = false
   for (;;) {
     if (i >= argv.length) return null
@@ -826,7 +827,7 @@ function judgeWords(words, st, env, out, io = {}) {
           runCode(argv.slice(i + 1).map((w) => w.text).join(' '), local, env, out)
           return null
         }
-        if (isAssignment(argv[i])) setVar(local, argv[i], env)
+        if (isAssignment(argv[i])) setVar(local, argv[i], env, out)
         if (o.startsWith('-') || isAssignment(argv[i])) { i++; continue }
         break
       }
@@ -926,8 +927,12 @@ function optionValues(args, names) {
   return out.filter(Boolean)
 }
 
-function setVar(st, word, env) {
+// The variables that hold the walls under the guard: the push block, the blocked tokens, ssh.
+const WALL_VARS = /^(GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+|GLOBAL|SYSTEM|NOSYSTEM)|GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|SSH_ASKPASS|GIT_EXEC_PATH|NIGHT_\w+)$/
+
+function setVar(st, word, env, out) {
   const m = /^([A-Za-z_]\w*)(\[[^\]]*\])?(\+?)=/.exec(word.parts[0].v)
+  if (out && WALL_VARS.test(m[1])) fail(out, say.wallVar(m[1]))
   if (m[2] || m[3]) { st.vars.set(m[1], UNKNOWN); return }
   const value = valueAfterEq(word)
   const sub = value.parts.length === 1 && value.parts[0].k === 'sub' && value.subs.length === 1
@@ -1020,9 +1025,14 @@ function ruleFor(name, args, local, st, env, out, io) {
     case 'find': return findRule(args, local, env, out)
     case 'cd': case 'pushd': case 'popd': changeDir(name, args, st, env); return null
     case 'export': case 'local': case 'declare': case 'typeset': case 'readonly':
-      for (const a of args) if (isAssignment(a)) setVar(st, a, env)
+      for (const a of args) if (isAssignment(a)) setVar(st, a, env, out)
       return null
-    case 'unset': for (const a of args) st.vars.delete(a.text); return null
+    case 'unset':
+      for (const a of args) {
+        if (WALL_VARS.test(a.text)) return say.wallVar(a.text)
+        st.vars.delete(a.text)
+      }
+      return null
     case 'alias': return args.some((a) => a.text.includes('=')) ? R.shellAlias : null
     case 'read':
       for (const a of operands(args, new Set(['-a', '-d', '-i', '-n', '-N', '-p', '-t', '-u']))) st.vars.set(a.text, UNKNOWN)
@@ -1078,6 +1088,8 @@ function gitRule(args, local, env) {
     if (t === '-c' || t === '--config-env' || t.startsWith('--config-env=')) {
       const value = t.startsWith('--config-env=') ? t.slice(13) : args[++k]?.text ?? ''
       if (/^alias\./i.test(value) || /=\s*!/.test(value)) return R.alias
+      if (/^core\.hookspath\b/i.test(value)) return R.noVerify
+      if (/^(url\.|remote\.[^=]*\.(pushurl|url)|credential\.|core\.sshcommand)/i.test(value)) return R.config
       continue
     }
     if (t === '--git-dir' || t === '--work-tree') { if (args[k + 1]) places.push(args[++k]); continue }
@@ -1093,6 +1105,7 @@ function gitRule(args, local, env) {
   if (!writable(dir, env, 'path')) return say.gitOutside(dir && shown(dir, env))
   for (const [key, value] of local.vars) {
     if (/^GIT_CONFIG_(PARAMETERS|KEY_\d+)$/.test(key) && /alias\./i.test(value.text)) return R.alias
+    if (/^GIT_CONFIG_(PARAMETERS|KEY_\d+)$/.test(key) && /hookspath/i.test(value.text)) return R.noVerify
   }
   const located = [
     ...places.map((w) => (w ? literal(w, local, env) : UNKNOWN)),
@@ -1105,6 +1118,22 @@ function gitRule(args, local, env) {
   const rest = args.slice(k + 1)
   switch (sub.text) {
     case 'push': case 'send-pack': case 'http-push': return R.push
+    case 'fetch': case 'pull': {
+      // A refspec like `. HEAD:main` writes straight into a local branch.
+      for (const a of rest) {
+        const dst = /^\+?[^:]*:(?:refs\/heads\/)?(.+)$/.exec(a.text)?.[1]
+        if (dst && env.protect(dst)) return say.protectedEdit(dst)
+      }
+      return null
+    }
+    case 'rebase': {
+      // `git rebase <upstream> <branch>` checks <branch> out first, then rewrites it.
+      const ops = rest.filter((a) => !a.text.startsWith('-')).map((a) => a.text)
+      const onto = rest.findIndex((a) => a.text === '--onto')
+      const operandsLeft = onto >= 0 ? ops.filter((o) => o !== rest[onto + 1]?.text) : ops
+      const branch = operandsLeft.length >= 2 ? operandsLeft.at(-1) : null
+      return branch && env.protect(branch) ? say.protectedBranch(branch) : null
+    }
     case 'send-email': return R.send
     case 'checkout': case 'switch': return checkoutRule(sub.text, rest, env)
     case 'branch': return branchRule(rest, env)

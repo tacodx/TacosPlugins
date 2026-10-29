@@ -549,7 +549,7 @@ test('a test run is wrapped in the shared lock and keeps every other input field
   const result = run('Bash', { command: 'npm test', description: 'run tests', timeout: 600000 })
   assert.equal(result.decision, 'rewrite')
   assert.deepEqual(result.input, {
-    command: "flock /home/u/.night/test.lock sh -c 'npm test'",
+    command: "flock -w 540 /home/u/.night/test.lock sh -c 'npm test'",
     description: 'run tests',
     timeout: 600000,
   })
@@ -557,9 +557,9 @@ test('a test run is wrapped in the shared lock and keeps every other input field
 
 test('single quotes inside a wrapped test command survive the wrapping', () => {
   const result = run('Bash', { command: "npm test -- -t 'adds two'" })
-  assert.equal(result.input.command, "flock /home/u/.night/test.lock sh -c 'npm test -- -t '\\''adds two'\\'''")
+  assert.equal(result.input.command, "flock -w 540 /home/u/.night/test.lock sh -c 'npm test -- -t '\\''adds two'\\'''")
   const inner = splitShell(result.input.command)
-  assert.deepEqual(inner, [['flock', '/home/u/.night/test.lock', 'sh', '-c', "npm test -- -t 'adds two'"]])
+  assert.deepEqual(inner, [['flock', '-w', '540', '/home/u/.night/test.lock', 'sh', '-c', "npm test -- -t 'adds two'"]])
 })
 
 test('the wrapped command is not wrapped a second time', () => {
@@ -659,7 +659,7 @@ test('a rewritten call prints allow with the new input and writes a rewrite even
   const out = hook(bashCall('npm test', { description: 'tests' }), { ...ENV, NIGHT_EVENTS: events })
   assert.equal(out.hookSpecificOutput.permissionDecision, 'allow')
   assert.deepEqual(out.hookSpecificOutput.updatedInput, {
-    command: "flock /home/u/.night/test.lock sh -c 'npm test'", description: 'tests',
+    command: "flock -w 540 /home/u/.night/test.lock sh -c 'npm test'", description: 'tests',
   })
   const [line] = readFileSync(events, 'utf8').trim().split('\n').map((text) => JSON.parse(text))
   assert.equal(line.kind, 'guard.rewrite')
@@ -754,4 +754,23 @@ test('builds wait for the same lock as tests', () => {
     assert.equal(decide('Bash', { command }, CTX).decision, 'rewrite', command)
   }
   for (const command of ['npm run dev', 'next dev', 'cargo check']) assert.notEqual(decide('Bash', { command }, CTX).decision, 'rewrite', command)
+})
+
+test('review findings: protected branches cannot move through fetch, pull or rebase', () => {
+  for (const command of ['git fetch . HEAD:main', 'git fetch origin +night:refs/heads/main', 'git pull . HEAD:master', 'git rebase HEAD main', 'git rebase --onto x y main']) {
+    assert.equal(decide('Bash', { command }, CTX).decision, 'deny', command)
+  }
+  for (const command of ['git fetch origin', 'git pull --rebase origin main', 'git rebase main', 'git rebase -i HEAD~2', 'git fetch origin main:refs/remotes/origin/main']) {
+    assert.notEqual(decide('Bash', { command }, CTX).decision, 'deny', command)
+  }
+})
+
+test('review findings: hooks cannot be switched off and the walls cannot be unset', () => {
+  for (const command of ['git -c core.hooksPath=/dev/null commit -m x', 'GIT_CONFIG_COUNT=0 ./release.sh', 'export GH_TOKEN=real', 'unset GIT_CONFIG_COUNT', 'GIT_SSH_COMMAND=ssh git fetch', 'env GITHUB_TOKEN=x npm test', 'git -c credential.helper=store fetch', 'git -c remote.origin.pushurl=x status']) {
+    assert.equal(decide('Bash', { command }, CTX).decision, 'deny', command)
+  }
+})
+
+test('review findings: the test lock waits at most nine minutes', () => {
+  assert.match(decide('Bash', { command: 'npm test' }, CTX).input.command, /^flock -w 540 /)
 })
