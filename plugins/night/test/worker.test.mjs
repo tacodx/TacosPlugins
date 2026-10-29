@@ -160,3 +160,10 @@ test('after a failed canary no worker starts any Claude run', async (t) => {
   assert.equal((await workerTurn(1, { paths: s.paths, deps: s.deps })).state, 'unsafe')
   assert.equal(s.calls().length, 0)
 })
+
+test('when memory is tight only the first worker runs', async (t) => {
+  const s = setup(t)
+  writeJson(s.files.health, { verdict: { blockers: [], tight: true } })
+  assert.equal((await workerTurn(2, { paths: s.paths, deps: s.deps })).state, 'tight on memory')
+  assert.equal((await workerTurn(1, { paths: s.paths, deps: s.deps })).state, 'done')
+})

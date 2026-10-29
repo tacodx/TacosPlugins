@@ -173,15 +173,23 @@ test('the default runner returns what a command printed and throws when it fails
 })
 
 test('a calm sample has nothing to say', () => {
-  assert.deepEqual(none({}), { blockers: [], warnings: [], thrash: false, blockTests: false, hot: false })
+  assert.deepEqual(none({}), { blockers: [], warnings: [], thrash: false, blockTests: false, hot: false, tight: false })
 })
 
-test('swap over 95 % used is a blocker, and says how full', () => {
-  const v = none({ swapTotal: 8 * GB, swapFree: 0.24 * GB })
-  assert.deepEqual(v.blockers, [{ code: 'swap-full', text: 'Swap is 97 % full.' }])
+test('swap over 95 % used with little RAM left is a blocker, and says how full', () => {
+  const v = none({ swapTotal: 8 * GB, swapFree: 0.24 * GB, memAvailable: 3 * GB })
+  assert.deepEqual(v.blockers, [{ code: 'swap-full', text: 'Swap is 97 % full and only 3.0 GB of RAM is free.' }])
   assert.deepEqual(v.warnings, [])
-  assert.equal(none({ swapTotal: 100, swapFree: 5 }).blockers.length, 0, 'exactly 95 % is not over')
-  assert.equal(none({ swapTotal: 100, swapFree: 4 }).blockers.length, 1)
+  assert.equal(none({ swapTotal: 100, swapFree: 5, memAvailable: GB }).blockers.length, 0, 'exactly 95 % is not over')
+  assert.equal(none({ swapTotal: 100, swapFree: 4, memAvailable: GB }).blockers.length, 1)
+  assert.equal(none({ swapTotal: 100, swapFree: 4, memAvailable: null }).blockers.length, 1, 'unknown free RAM blocks')
+})
+
+test('full swap with plenty of RAM free lets the night go on with one worker', () => {
+  const v = none({ swapTotal: 8 * GB, swapFree: 0, memAvailable: 9 * GB })
+  assert.deepEqual(v.blockers, [])
+  assert.equal(v.tight, true)
+  assert.deepEqual(v.warnings, [{ code: 'swap-full', text: 'Swap is 100 % full, with 9.0 GB of RAM free: one worker at a time.' }])
 })
 
 test('a machine with no swap at all is not out of swap', () => {
@@ -236,12 +244,12 @@ test('a CPU over 85 or a GPU junction over 100 is hot', () => {
 
 test('a sample of nothing but nulls is calm: no reading, no complaint', () => {
   const blank = Object.fromEntries(Object.keys(calm).map((key) => [key, null]))
-  assert.deepEqual(verdict(blank, T), { blockers: [], warnings: [], thrash: false, blockTests: false, hot: false })
+  assert.deepEqual(verdict(blank, T), { blockers: [], warnings: [], thrash: false, blockTests: false, hot: false, tight: false })
 })
 
 test('everything wrong at once lists every blocker and warning', () => {
   const v = none({
-    swapFree: 0, psiFullAvg60: 9, diskFreeBytes: 1 * GB, tmpUsedPct: 99, cpuC: 99, gpuJunctionC: 120,
+    swapFree: 0, memAvailable: 1 * GB, psiFullAvg60: 9, diskFreeBytes: 1 * GB, tmpUsedPct: 99, cpuC: 99, gpuJunctionC: 120,
   })
   assert.deepEqual(codes(v.blockers), ['swap-full', 'disk-full'])
   assert.deepEqual(codes(v.warnings), ['thrash', 'tmp-full', 'hot'])
@@ -249,7 +257,7 @@ test('everything wrong at once lists every blocker and warning', () => {
 })
 
 test('the thresholds come from the config and can be changed', () => {
-  const strict = { ...T, swapBlockPct: 20, diskWarnGb: 80, cpuHotC: 40 }
+  const strict = { ...T, swapBlockPct: 20, memAvailBlockGb: 12, diskWarnGb: 80, cpuHotC: 40 }
   const v = verdict(calm, strict)
   assert.deepEqual(codes(v.blockers), ['swap-full'])
   assert.deepEqual(codes(v.warnings), ['disk-low', 'hot'])

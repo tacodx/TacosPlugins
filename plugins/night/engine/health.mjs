@@ -125,10 +125,23 @@ export function verdict(sample, thresholds = DEFAULTS.health) {
   let thrash = false
   let blockTests = false
   let hot = false
+  let tight = false
 
   if (isNum(sample.swapTotal) && sample.swapTotal > 0 && isNum(sample.swapFree)) {
     const used = ((sample.swapTotal - sample.swapFree) * 100) / sample.swapTotal
-    if (used > t.swapBlockPct) blockers.push({ code: 'swap-full', text: `Swap is ${Math.round(used)} % full.` })
+    if (used > t.swapBlockPct) {
+      // Full swap with little RAM left is the 1 October thrash: nothing new may start.
+      // Full swap with plenty of RAM is only cold pages that stay until their owners
+      // exit; workers cannot swap (MemorySwapMax=0), so the night goes on with one.
+      const avail = isNum(sample.memAvailable) ? sample.memAvailable : null
+      const text = `Swap is ${Math.round(used)} % full`
+      if (avail === null || avail < t.memAvailBlockGb * GB) {
+        blockers.push({ code: 'swap-full', text: `${text} and ${avail === null ? 'free RAM is unknown' : `only ${(avail / GB).toFixed(1)} GB of RAM is free`}.` })
+      } else {
+        tight = true
+        warnings.push({ code: 'swap-full', text: `${text}, with ${(avail / GB).toFixed(1)} GB of RAM free: one worker at a time.` })
+      }
+    }
   }
 
   if (isNum(sample.psiFullAvg60) && sample.psiFullAvg60 > t.psiFullAvg60) {
@@ -163,7 +176,7 @@ export function verdict(sample, thresholds = DEFAULTS.health) {
     warnings.push({ code: 'hot', text: heat.join(' ') })
   }
 
-  return { blockers, warnings, thrash, blockTests, hot }
+  return { blockers, warnings, thrash, blockTests, hot, tight }
 }
 
 // The element with the highest `key`; the later one wins a tie.

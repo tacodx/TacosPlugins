@@ -370,5 +370,11 @@ Instead:
   on this very repo cannot stop or rearm it.
 - The recap publisher runs with `--tools Artifact` only, because the page holds text workers wrote.
 - Recap counts commits with `--branches`, not `--all` (no stash).
+- **Full swap, refined (found while testing, 29 October 20:00).** zram swap was 8 of 8 GB with 8.8 GB of RAM
+  free and no memory pressure, and it stays full until the programs that own those pages exit. Blocking on full
+  swap alone would have kept every worker idle all night. Workers cannot swap (`MemorySwapMax=0`) and share an
+  18 GB ceiling, so the 1 October failure cannot happen through them. Full swap is now a blocker only when free
+  RAM is also under 6 GB (`health.memAvailBlockGb`); with more free RAM it limits the night to one worker.
+  Memory pressure (PSI) still pauses workers as before.
 - Cut from v1: the idle wait at dusk (KDE Wayland does not report idle time), building fan modes through the
   API, the hourly HTML recap (the pane reads the live view), and a third pane tab.
