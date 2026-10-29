@@ -19,8 +19,8 @@ export function git(dir, args, env = {}) {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...GIT_ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
-/** The git runner the readers take, isolated the same way. */
-export const run = (args, cwd) => git(cwd, args)
+/** The git runner the readers take, isolated the same way: arguments, folder, extra environment. */
+export const run = (args, cwd, env = {}) => git(cwd, args, env)
 
 /** A new repo whose commits are made as `email` unless a commit says otherwise. */
 export function makeRepo(dir, { email = 'me@example.com' } = {}) {

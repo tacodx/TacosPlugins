@@ -6,9 +6,16 @@
 // author's email, and only the ones made by your own identities are counted.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
-/** Bumped when what is kept per commit changes, so older entries are read again. */
-export const GIT_VERSION = 1
+/** Bumped when what is kept per repo changes, so older entries are read again. */
+export const GIT_VERSION = 2
+
+// Every git call only reads: it takes no lock another session's git could trip
+// over, and a partial clone is never made to fetch what it lacks (git 2.44 and
+// newer; older ones are kept from it by not being asked for file contents).
+const READ_ENV = { GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1' }
 
 // Names of files a package manager writes: a lockfile can add thousands of lines
 // nobody wrote, so its lines are not counted as lines added.
@@ -18,16 +25,15 @@ const LOCKFILES = new Set([
   'flake.lock', 'pubspec.lock', 'Podfile.lock', 'mix.lock', 'packages.lock.json',
 ])
 
-/** Runs git in `cwd` and answers what it printed; throws when it fails. */
-export function runGit(args, cwd) {
+/** Runs git in `cwd`, `env` added to the environment, and answers what it printed; throws when it fails or takes over 20 s. */
+export function runGit(args, cwd, env = {}) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: 20_000,
     maxBuffer: 256 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
-    // Reads only: no lock another session's git could trip over.
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    env: { ...process.env, ...env },
   })
 }
 
@@ -61,74 +67,128 @@ export function parseLog(text) {
   return commits
 }
 
-/** Every commit on any ref but the stash and notes, committed since `since` (ms). */
-export function readLog(repo, since, run = runGit) {
-  return parseLog(
-    run(
-      [
-        'log', '--exclude=refs/stash', '--exclude=refs/notes/*', '--all', `--since=${Math.floor(since / 1000)}`,
-        '--no-color', '--no-ext-diff', '--no-textconv', '--no-show-signature',
-        '--format=%x1e%H%x1f%at%x1f%ae', '--numstat',
-      ],
-      repo,
-    ),
-  )
+/**
+ * Every commit on any ref but the stash and notes, committed since `since` (ms).
+ * With `lines` false no file is looked at, and every commit adds 0 lines.
+ */
+export function readLog(repo, since, run = runGit, { lines = true } = {}) {
+  const args = [
+    'log', '--exclude=refs/stash', '--exclude=refs/notes/*', '--all', `--since=${Math.floor(since / 1000)}`,
+    '--no-color', '--no-show-signature', '--format=%x1e%H%x1f%at%x1f%ae',
+  ]
+  if (lines) args.push('--no-ext-diff', '--no-textconv', '--numstat')
+  return parseLog(run(args, repo, READ_ENV))
 }
 
-/** A hash of every ref and HEAD; '' for a repo with no commits yet. Throws when git cannot read the repo. */
+/**
+ * A hash of every ref, HEAD and the HEAD of every linked worktree (which `log
+ * --all` follows and no ref names); '' for a repo with no commits yet. Throws
+ * when git cannot read the repo.
+ */
 export function refsKey(repo, run = runGit) {
   let refs
   try {
-    refs = run(['show-ref', '--head'], repo)
+    refs = run(['show-ref', '--head'], repo, READ_ENV)
   } catch (err) {
     // show-ref exits 1, saying nothing, where there is no ref at all.
     if (err.status === 1 && String(err.stdout ?? '') === '') return ''
     throw err
   }
-  return createHash('sha1').update(refs).digest('hex')
-}
-
-/** The email the repo commits as (its own config, else the global one), or null. */
-function identity(repo, run) {
-  try {
-    const email = run(['config', 'user.email'], repo).trim().toLowerCase()
-    return email === '' ? null : email
-  } catch {
-    return null
-  }
+  const heads = existsSync(join(repo, '.git', 'worktrees')) ? run(['worktree', 'list', '--porcelain'], repo, READ_ENV) : ''
+  return createHash('sha1').update(refs).update('\0').update(heads).digest('hex')
 }
 
 /**
- * Brings each repo's entry up to date. An entry whose refs have not moved is kept,
- * less any commit older than `since`; the rest are read again.
- * @param {{ path: string, name: string }[]} repos
- * @param {{ cache: Record<string, any>, since: number, run?: Function }} options cache keyed by path
- * @returns {{ cache: Record<string, { v: number, key: string, since: number, email: string | null, commits: object[] }>, unreadable: string[] }}
+ * The email the repo commits as (its own config, else the global one), and
+ * whether it is a partial clone: one with a promisor remote, from which git
+ * would fetch any file it lacks.
  */
-export function collect(repos, { cache, since, run = runGit }) {
+function settings(repo, run) {
+  let text = ''
+  try {
+    text = run(['config', '--get-regexp', '^(user\\.email|extensions\\.partialclone|remote\\..+\\.promisor)$'], repo, READ_ENV)
+  } catch {
+    // exit 1: none is set
+  }
+  const emails = [...text.matchAll(/^user\.email (.*)$/gm)].map((match) => match[1].trim().toLowerCase()).filter(Boolean)
+  return { email: emails.at(-1) ?? null, isPartial: /^extensions\.partialclone \S/m.test(text) || /^remote\..+\.promisor true$/m.test(text) }
+}
+
+const isCommit = (each) =>
+  typeof each === 'object' && each !== null && typeof each.h === 'string' && Number.isFinite(each.t) && typeof each.e === 'string' && Number.isFinite(each.a)
+
+/** An entry this version wrote, whole: anything else is read again. */
+const isEntry = (entry) =>
+  typeof entry === 'object' && entry !== null && entry.v === GIT_VERSION && typeof entry.key === 'string' &&
+  Number.isFinite(entry.since) && Array.isArray(entry.commits) && entry.commits.every(isCommit)
+
+/** An entry less any commit older than `since`. */
+function trimmed(entry, since) {
+  const kept = entry.commits.filter((each) => each.t >= since)
+  return kept.length === entry.commits.length ? entry : { ...entry, since: Math.max(entry.since, since), commits: kept }
+}
+
+/**
+ * Brings each repo's entry up to date. An entry whose refs have not moved is
+ * kept, less any commit older than `since`; the rest are read again. A repo git
+ * cannot read, and every repo after `deadline` (by `clock`), keeps the entry it
+ * had, so a slow or broken repo costs this run its news and not its history.
+ * @param {{ path: string, name: string }[]} repos
+ * @param {{ cache: Record<string, any>, since: number, run?: Function, deadline?: number, clock?: () => number }} options
+ *   cache keyed by path
+ * @returns {{ cache: Record<string, { v: number, key: string, since: number, email: string | null, lines: boolean, commits: object[] }>,
+ *             unreadable: string[], late: string[], partial: string[] }} `partial`: repos whose lines are not counted
+ */
+export function collect(repos, { cache, since, run = runGit, deadline = Infinity, clock = Date.now }) {
   const next = {}
   const unreadable = []
+  const late = []
+  const partial = []
   for (const { path, name } of repos) {
+    const old = isEntry(cache[path]) ? cache[path] : undefined
+    const keepOld = () => {
+      if (old !== undefined) next[path] = trimmed(old, since)
+    }
+    if (clock() > deadline) {
+      late.push(name)
+      keepOld()
+      continue
+    }
     let key
     try {
       key = refsKey(path, run)
     } catch {
       unreadable.push(name)
+      keepOld()
       continue
     }
-    const old = cache[path]
-    if (old && old.v === GIT_VERSION && old.key === key && old.since <= since && Array.isArray(old.commits)) {
-      const kept = old.commits.filter((each) => each.t >= since)
-      next[path] = kept.length === old.commits.length ? old : { ...old, since, commits: kept }
+    if (old !== undefined && old.key === key && old.since <= since) {
+      next[path] = trimmed(old, since)
+      if (old.lines === false) partial.push(name)
       continue
     }
     try {
-      next[path] = { v: GIT_VERSION, key, since, email: key === '' ? null : identity(path, run), commits: key === '' ? [] : readLog(path, since, run) }
+      const { email, isPartial } = key === '' ? { email: null, isPartial: false } : settings(path, run)
+      let lines = !isPartial
+      let commits = []
+      if (key !== '') {
+        try {
+          commits = readLog(path, since, run, { lines })
+        } catch (err) {
+          // A file git cannot read without fetching it, or cannot read at all: count the commits alone.
+          if (!lines) throw err
+          lines = false
+          commits = readLog(path, since, run, { lines })
+        }
+      }
+      next[path] = { v: GIT_VERSION, key, since, email, lines, commits }
+      if (!lines) partial.push(name)
     } catch {
       unreadable.push(name)
+      keepOld()
     }
   }
-  return { cache: next, unreadable }
+  return { cache: next, unreadable, late, partial }
 }
 
 /**

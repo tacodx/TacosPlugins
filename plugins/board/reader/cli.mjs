@@ -19,6 +19,9 @@ const OPTIONS = ['home', 'claude', 'now', 'tz']
 const USAGE = 'usage: cli.mjs view [--home dir] [--claude dir] [--now iso-time] [--tz zone]'
 // Commits are kept for a day longer than the seven the pane shows, so a day boundary never falls short.
 const KEEP_MS = 8 * 24 * 60 * 60 * 1000
+// Past this, repos not yet read keep what they had and are read at the next refresh, so a
+// hanging repo cannot run the reader into the pane's time limit and lose every repo's news.
+const BUDGET_MS = 45_000
 
 class UsageError extends Error {}
 
@@ -36,6 +39,9 @@ function parse(argv) {
 /** A path as the person would write it, with ~ for their home. */
 const tildify = (path, home) => (path === home ? '~' : path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path)
 
+/** "1 repo", "2 repos", and the names. */
+const names = (list) => `${list.length} ${list.length === 1 ? 'repo' : 'repos'}: ${list.join(', ')}`
+
 function view(options, env) {
   const home = options.home ?? homedir()
   const claude = options.claude ?? (env.CLAUDE_CONFIG_DIR || join(home, '.claude'))
@@ -45,13 +51,15 @@ function view(options, env) {
   const data = join(claude, 'tacos', 'board')
 
   const { config } = loadConfig(data, home)
+  const configFile = tildify(join(data, CONFIG_FILE), home)
   const repos = expandRepos(config.repos, home)
   const cache = readCache(data)
-  const read = collect(repos, { cache: cache.repos, since: now - KEEP_MS })
+  const read = collect(repos, { cache: cache.repos, since: now - KEEP_MS, deadline: Date.now() + BUDGET_MS })
   const notes = []
-  if (read.unreadable.length > 0) {
-    notes.push(`${read.unreadable.length} ${read.unreadable.length === 1 ? 'repo' : 'repos'} could not be read: ${read.unreadable.join(', ')}.`)
-  }
+  if (repos.length === 0) notes.push(`No git repo was found in the folders listed under "repos" in ${configFile}.`)
+  if (read.unreadable.length > 0) notes.push(`Git could not read ${names(read.unreadable)}.`)
+  if (read.late.length > 0) notes.push(`Not read in time, so read at the next refresh: ${names(read.late)}.`)
+  if (read.partial.length > 0) notes.push(`Lines added are not counted for partial clones, as the board fetches nothing: ${names(read.partial)}.`)
 
   const built = buildView({
     commits: mine(repos, read.cache, config.authors),
@@ -63,7 +71,7 @@ function view(options, env) {
     refreshMinutes: config.refreshMinutes,
     repos: { count: repos.length, unreadable: read.unreadable },
     notes,
-    configFile: tildify(join(data, CONFIG_FILE), home),
+    configFile,
   })
 
   const next = { repos: read.cache, colours: built.colours }

@@ -78,7 +78,16 @@ test('a project folder git cannot read is a note, not a failure', (t) => {
   assert.equal(ran.code, 0, ran.stderr)
   const view = JSON.parse(ran.stdout)
   assert.deepEqual(view.repos.unreadable, ['broken'])
-  assert.deepEqual(view.notes, ['1 repo could not be read: broken.'])
+  assert.deepEqual(view.notes, ['Git could not read 1 repo: broken.'])
+})
+
+test('with no repo found, the board says where to list them', (t) => {
+  const home = tempDir(t)
+
+  const ran = cli(['view', '--home', home, '--claude', join(home, '.claude'), '--now', NOW, '--tz', 'UTC'])
+
+  assert.equal(ran.code, 0, ran.stderr)
+  assert.deepEqual(JSON.parse(ran.stdout).notes, ['No git repo was found in the folders listed under "repos" in ~/.claude/tacos/board/config.json.'])
 })
 
 test('a cache that is not JSON is rebuilt', (t) => {

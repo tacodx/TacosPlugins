@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { collect, isLockfile, mine, parseLog, readLog } from '../reader/git.mjs'
+import { collect, GIT_VERSION, isLockfile, mine, parseLog, readLog } from '../reader/git.mjs'
 import { commit, git, lines, makeRepo, run, tempDir } from './helpers.mjs'
 
 const ms = (iso) => Date.parse(iso)
@@ -80,9 +80,9 @@ function counting() {
   const calls = []
   return {
     calls,
-    run: (args, cwd) => {
+    run: (args, cwd, env) => {
       calls.push(args[0])
-      return run(args, cwd)
+      return run(args, cwd, env)
     },
   }
 }
@@ -186,4 +186,84 @@ test('with no identity anywhere, every commit counts', () => {
   const cache = { '/p/alpha': { email: null, commits: [{ h: 'a1', t: 1, e: 'anyone@example.com', a: 5 }] } }
 
   assert.deepEqual(mine([{ path: '/p/alpha', name: 'alpha' }], cache, []), [{ h: 'a1', t: 1, a: 5, project: 'alpha' }])
+})
+
+test('a commit on a detached worktree moves the key, though no ref did', (t) => {
+  const root = tempDir(t)
+  const alpha = makeRepo(join(root, 'alpha'))
+  commit(alpha, { at: '2026-03-09T08:00:00Z' })
+  git(alpha, ['worktree', 'add', '-q', '--detach', join(root, 'wt')])
+  const repos = [{ path: alpha, name: 'alpha' }]
+  const one = collect(repos, { cache: {}, since: SINCE, run })
+
+  commit(join(root, 'wt'), { at: '2026-03-09T10:00:00Z' })
+  const two = collect(repos, { cache: one.cache, since: SINCE, run })
+
+  assert.equal(two.cache[alpha].commits.length, 2)
+})
+
+test('a partial clone is never made to fetch: its commits count, its lines are left out', (t) => {
+  const root = tempDir(t)
+  const origin = makeRepo(join(root, 'origin'))
+  commit(origin, { at: '2026-03-09T08:00:00Z', files: { 'a.txt': lines(5) } })
+  commit(origin, { at: '2026-03-09T09:00:00Z', files: { 'a.txt': lines(9) } })
+  git(origin, ['config', 'uploadpack.allowFilter', 'true'])
+  git(root, ['clone', '-q', '--filter=blob:none', '--no-checkout', `file://${origin}`, 'partial'])
+  const partial = join(root, 'partial')
+  git(partial, ['config', 'user.email', 'me@example.com'])
+  const before = git(partial, ['count-objects', '-v'])
+
+  const read = collect([{ path: partial, name: 'partial' }], { cache: {}, since: SINCE, run })
+
+  assert.deepEqual(read.cache[partial].commits.map((each) => each.a), [0, 0])
+  assert.equal(read.cache[partial].lines, false)
+  assert.deepEqual(read.partial, ['partial'])
+  assert.equal(git(partial, ['count-objects', '-v']), before)
+})
+
+test('a cache entry this version did not write, or that is broken, is read again', (t) => {
+  const alpha = makeRepo(join(tempDir(t), 'alpha'))
+  commit(alpha, { at: '2026-03-09T08:00:00Z' })
+  const repos = [{ path: alpha, name: 'alpha' }]
+  const key = collect(repos, { cache: {}, since: SINCE, run }).cache[alpha].key
+
+  for (const broken of [{ v: GIT_VERSION, key, since: SINCE, email: null, lines: true, commits: [null] }, { v: GIT_VERSION, key, since: SINCE, email: null, lines: true, commits: 'no' }, null, 'text']) {
+    const read = collect(repos, { cache: { [alpha]: broken }, since: SINCE, run })
+    assert.equal(read.cache[alpha].commits.length, 1, JSON.stringify(broken))
+  }
+})
+
+test('a repo that cannot be read keeps the commits read before, and is named', (t) => {
+  const root = tempDir(t)
+  const alpha = makeRepo(join(root, 'alpha'))
+  commit(alpha, { at: '2026-03-02T08:00:00Z' })
+  commit(alpha, { at: '2026-03-09T08:00:00Z' })
+  const repos = [{ path: alpha, name: 'alpha' }]
+  const one = collect(repos, { cache: {}, since: SINCE, run })
+
+  const failing = (args, cwd, env) => (args[0] === 'show-ref' ? (() => { throw new Error('timed out') })() : run(args, cwd, env))
+  const two = collect(repos, { cache: one.cache, since: ms('2026-03-05T00:00:00Z'), run: failing })
+
+  assert.deepEqual(two.unreadable, ['alpha'])
+  assert.equal(two.cache[alpha].commits.length, 1)
+})
+
+test('past its deadline a run reads no more repos: they keep what they had and wait for the next', (t) => {
+  const root = tempDir(t)
+  const alpha = makeRepo(join(root, 'alpha'))
+  const beta = makeRepo(join(root, 'beta'))
+  commit(alpha, { at: '2026-03-09T08:00:00Z' })
+  commit(beta, { at: '2026-03-09T08:00:00Z' })
+  const repos = [{ path: alpha, name: 'alpha' }, { path: beta, name: 'beta' }]
+  const one = collect(repos, { cache: {}, since: SINCE, run })
+  commit(alpha, { at: '2026-03-09T09:00:00Z' })
+  commit(beta, { at: '2026-03-09T09:00:00Z' })
+  let now = 0
+  const clock = () => (now += 10)
+
+  const two = collect(repos, { cache: one.cache, since: SINCE, run, deadline: 15, clock })
+
+  assert.deepEqual(two.late, ['beta'])
+  assert.equal(two.cache[alpha].commits.length, 2)
+  assert.equal(two.cache[beta].commits.length, 1)
 })
