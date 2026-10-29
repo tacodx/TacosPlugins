@@ -167,3 +167,16 @@ test('when memory is tight only the first worker runs', async (t) => {
   assert.equal((await workerTurn(2, { paths: s.paths, deps: s.deps })).state, 'tight on memory')
   assert.equal((await workerTurn(1, { paths: s.paths, deps: s.deps })).state, 'done')
 })
+
+test('a Claude killed on the first item of a new project resumes that session, whatever the last project counted', async (t) => {
+  const s = setup(t, { mode: 'crash' })
+  writeJson(join(s.files.workers, '1.json'), { slot: 1, sessionId: 'old-session', sessionProject: 'other', sessionStarted: true, itemsInSession: 6 })
+  await workerTurn(1, { paths: s.paths, deps: s.deps })
+  s.deps.env.FAKE_MODE = 'done'
+  await workerTurn(1, { paths: s.paths, deps: s.deps })
+  const [first, second] = s.calls()
+  const id = first.args[first.args.indexOf('--session-id') + 1]
+  assert.notEqual(id, 'old-session')
+  assert.equal(second.args[second.args.indexOf('--resume') + 1], id)
+  assert.match(second.args[1], /Continue the item/)
+})

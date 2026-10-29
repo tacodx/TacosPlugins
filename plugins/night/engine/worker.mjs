@@ -204,6 +204,8 @@ export async function workerTurn(slot, { paths, deps }) {
   save({
     state: 'working', project: item.project, itemId: item.id, itemTitle: item.title, sessionId, sessionProject: item.project,
     sessionStarted: true, since: now, interrupted: 'a restart',
+    // A new session starts its count again; a stale count from another project must not block a resume.
+    itemsInSession: sameSession ? ws.itemsInSession ?? 0 : 0,
   })
   addEvent(files, 'worker.start', { slot, item: item.id, project: item.project, title: item.title, sessionId, resume }, now)
 
@@ -263,7 +265,7 @@ export async function workerTurn(slot, { paths, deps }) {
     addEvent(files, 'worker.result', { slot, item: item.id, project: item.project, outcome: result, line, cost: outcome.cost }, end)
     save({
       state: 'between items', sessionId: realSession, sessionProject: item.project, itemId: null,
-      itemsInSession: (sameSession ? ws.itemsInSession ?? 0 : 0) + 1, backoffStep: 0, interrupted: null,
+      itemsInSession: (readJson(wp.state, {})?.itemsInSession ?? 0) + 1, backoffStep: 0, interrupted: null,
     })
     return { wait: 2_000, state: 'done' }
   }
