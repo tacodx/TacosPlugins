@@ -111,11 +111,12 @@ export function dirtyPaths(dir, { run = runGit } = {}) {
 }
 
 /**
- * Commits on any branch since `since` (ms): hash, time, author, subject, lines
- * added and removed. Merges are left out.
+ * Commits on any local branch since `since` (ms): hash, time, author, subject,
+ * lines added and removed. Merges are left out; `exclude` leaves out branches
+ * matching a glob (the night's own, when counting what the owner's sessions did).
  */
-export function commitsSince(repo, since, { until, run = runGit } = {}) {
-  const args = ['log', '--branches', '--no-merges', `--since=${new Date(since).toISOString()}`]
+export function commitsSince(repo, since, { until, exclude, run = runGit } = {}) {
+  const args = ['log', ...(exclude ? [`--exclude=${exclude}`] : []), '--branches', '--no-merges', `--since=${new Date(since).toISOString()}`]
   if (until) args.push(`--until=${new Date(until).toISOString()}`)
   args.push('--format=%x1e%H%x1f%at%x1f%ae%x1f%s', '--numstat')
   const out = tryGit(run, args, { cwd: repo })

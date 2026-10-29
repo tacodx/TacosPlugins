@@ -185,7 +185,7 @@ export function healthLine(events) {
     if (!e || typeof e.kind !== 'string') continue
     if (e.kind === 'health.blocker' && e.code === 'disk-full') disk += 1
     else n[e.kind] = (n[e.kind] ?? 0) + 1
-    if ((e.kind === 'dusk.step' || e.kind === 'dawn.step') && e.ok === false) failedSteps += 1
+    if ((e.kind === 'dusk.step' || e.kind === 'dawn.step') && e.ok === false && !e.skipped) failedSteps += 1
   }
   const parts = []
   const restarts = (n['worker.restart'] ?? 0) + (n['watcher.restart'] ?? 0)

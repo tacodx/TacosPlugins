@@ -419,8 +419,11 @@ export function recapInput(paths, date, { now, zone }) {
     sessions.push({ kind: 'worker', name: `Night ${slot}`, project: projectsOfSlot.join(', '), branch: projectsOfSlot.map((p) => `night/${date}/${p}`).join(', '), results, commits: 0, state: ws.state ?? 'off' })
   }
   const live = readJson(files.sessions, null)?.sessions ?? []
+  // A desktop session earns a line only when it did something tonight or waits on a dialog: calm, not a census.
   for (const s of live.filter((x) => x.kind === 'desktop')) {
-    const own = commits.filter((c) => c.project === s.project).length
+    const repo = projects.find((p) => p.name === s.project)?.repo
+    const own = repo ? commitsSince(repo, start, { exclude: 'night/*' }).length : 0
+    if (own === 0 && s.label !== 'waiting') continue
     sessions.push({ kind: 'desktop', name: s.name || 'Desktop session', project: s.project ?? '', branch: s.branch ?? '', results: [], commits: own, state: s.label })
   }
   const needsOwner = []

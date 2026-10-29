@@ -144,3 +144,16 @@ test('commits since an instant are counted on every branch, lock files left out'
   const added = commits.find((c) => c.subject === 'add a')
   assert.equal(added.added, 2)
 })
+
+test('commits on the night\'s own branches can be left out', (t) => {
+  const repo = makeRepo(t)
+  git(repo, 'checkout', '-q', '-b', 'night/2026-03-10/repo')
+  writeFileSync(join(repo, 'n.txt'), 'n\n')
+  git(repo, 'add', '.')
+  git(repo, 'commit', '-q', '-m', 'night work')
+  const all = commitsSince(repo, Date.now() - 3600_000).map((c) => c.subject)
+  const theirs = commitsSince(repo, Date.now() - 3600_000, { exclude: 'night/*' }).map((c) => c.subject)
+  assert.ok(all.includes('night work'))
+  assert.ok(!theirs.includes('night work'))
+  assert.ok(theirs.includes('tick b'))
+})
