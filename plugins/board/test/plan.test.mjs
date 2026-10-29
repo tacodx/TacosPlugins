@@ -64,6 +64,42 @@ test('a table with one column has names and no numbers', () => {
   ])
 })
 
+test('a file that starts with a byte-order mark still has its first heading', () => {
+  assert.deepEqual(parsePlan('\uFEFF## Next\n\n| # | Step |\n| --- | --- |\n| 1 | One |\n', 'Next').rows, [{ id: '1', name: 'One', done: false, note: '' }])
+})
+
+test('headings and tables inside code fences are code, not the plan', () => {
+  const doc = [
+    '## Next',
+    '',
+    '```md',
+    '# not a heading',
+    '| # | Step |',
+    '| --- | --- |',
+    '| 0 | Example |',
+    '```',
+    '',
+    '~~~',
+    '## also not a heading',
+    '~~~',
+    '',
+    '| # | Step |',
+    '| --- | --- |',
+    '| 1 | Real |',
+  ].join('\n')
+
+  assert.deepEqual(parsePlan(doc, 'Next').rows, [{ id: '1', name: 'Real', done: false, note: '' }])
+})
+
+test('a table may leave out the pipes at the ends of its rows', () => {
+  const doc = '## Next\n\nNo. | Step | Status\n--- | --- | ---\n~~1~~ | ~~Sketch~~ | **Done**\n2 | Build | **Started**\n\nAfter the table.\n'
+
+  assert.deepEqual(parsePlan(doc, 'Next').rows, [
+    { id: '1', name: 'Sketch', done: true, note: 'Done' },
+    { id: '2', name: 'Build', done: false, note: 'Started' },
+  ])
+})
+
 test('a missing section or a section with no table says which', () => {
   assert.deepEqual(parsePlan(DOC, 'Nowhere'), { error: 'there is no section "Nowhere"' })
   assert.deepEqual(parsePlan('## Empty\n\nNothing here.\n\n## Next\n\n| a |\n|---|\n| b |\n', 'Empty'), { error: 'the section "Empty" has no table' })

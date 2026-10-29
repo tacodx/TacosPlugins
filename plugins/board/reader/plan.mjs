@@ -13,7 +13,27 @@ const MAX_BYTES = 1024 * 1024
 
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
-const isRow = (line) => /^\s*\|/.test(line)
+const FENCE = /^ {0,3}(`{3,}|~{3,})/
+/** A line with a pipe that separates cells, one not escaped. */
+const hasPipe = (line) => /(^|[^\\])\|/.test(line)
+
+/** For each line, whether it is code: inside a fence, or a fence line itself. */
+function fenced(lines) {
+  const code = []
+  let fence = null
+  for (const line of lines) {
+    const match = FENCE.exec(line)
+    if (fence === null) {
+      if (match) fence = match[1]
+      code.push(match !== null)
+      continue
+    }
+    // A fence closes with a line of at least as many of the same mark and nothing else.
+    if (match && match[1][0] === fence[0] && match[1].length >= fence.length && line.trim() === match[1]) fence = null
+    code.push(true)
+  }
+  return code
+}
 
 /** Markdown down to the words: no emphasis, strike, code ticks or link targets. */
 export function plain(text) {
@@ -65,27 +85,32 @@ const words = (text) => plain(text).replace(/:$/, '').trim().toLowerCase()
  * @returns {{ rows: { id: string, name: string, done: boolean, note: string }[] } | { error: string }}
  */
 export function parsePlan(markdown, section) {
-  const lines = markdown.split(/\r?\n/)
+  const lines = markdown.replace(/^\uFEFF/, '').split(/\r?\n/)
+  const code = fenced(lines)
+  const headingAt = (i) => (code[i] ? null : HEADING.exec(lines[i]))
   let start = 0
   // The heading level that ends the section; 0 where there is no section and nothing ends it.
   let level = 0
   if (section) {
-    start = lines.findIndex((line) => {
-      const heading = HEADING.exec(line)
+    start = lines.findIndex((_, i) => {
+      const heading = headingAt(i)
       return heading !== null && words(heading[2]) === words(section)
     })
     if (start === -1) return { error: `there is no section "${section}"` }
-    level = HEADING.exec(lines[start])[1].length
+    level = headingAt(start)[1].length
     start += 1
   }
 
+  // A row: a line of cells outside code. A table: a row, then a line of dashes under it.
+  const isRow = (i) => i < lines.length && !code[i] && lines[i].trim() !== '' && hasPipe(lines[i])
   for (let i = start; i < lines.length; i += 1) {
-    const heading = HEADING.exec(lines[i])
+    const heading = headingAt(i)
     if (heading !== null && heading[1].length <= level) break
-    if (!isRow(lines[i]) || !SEPARATOR.test(lines[i + 1] ?? '')) continue
+    const under = lines[i + 1] ?? ''
+    if (!isRow(i) || code[i + 1] || !SEPARATOR.test(under) || !(under.includes('|') || /^\s*\|/.test(lines[i]))) continue
 
     const rows = []
-    for (let j = i + 2; j < lines.length && isRow(lines[j]); j += 1) {
+    for (let j = i + 2; isRow(j); j += 1) {
       const row = cells(lines[j])
       const [id, name] = row.length > 1 ? [row[0], row[1]] : ['', row[0]]
       rows.push({
