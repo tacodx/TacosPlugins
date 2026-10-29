@@ -488,7 +488,11 @@ export function recapInput(paths, date, { now, zone }) {
   for (let slot = 1; slot <= 4; slot++) {
     try {
       const text = readFileSync(join(paths.share, 'scratch', date, String(slot), 'decisions.md'), 'utf8')
-      for (const line of text.split('\n')) if (line.trim()) decisions.push(line.trim().slice(0, 300))
+      // One decision per dated line, as the worker rules ask; a note's further lines belong to it.
+      for (const line of text.split('\n')) {
+        if (/^(- )?\d{4}-\d{2}-\d{2}/.test(line.trim())) decisions.push(line.trim().slice(0, 300))
+        else if (line.trim() && decisions.length) decisions[decisions.length - 1] = `${decisions.at(-1)} ${line.trim()}`.slice(0, 300)
+      }
     } catch { /* no decisions from this slot */ }
   }
   if (decisions.length) needsOwner.push(`${decisions.length} call${decisions.length === 1 ? '' : 's'} made for you, in decisions.md`)
