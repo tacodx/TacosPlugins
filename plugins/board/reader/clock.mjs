@@ -8,8 +8,15 @@ const QUARTER_HOUR = 15 * 60 * 1000
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
+/** The computer's time zone, or UTC where it has none that can be used (TZ set but empty gives "Etc/Unknown"). */
 export function systemTimeZone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone })
+    return zone
+  } catch {
+    return 'UTC'
+  }
 }
 
 /** @returns {(ms: number) => { day: string, hour: number }} */

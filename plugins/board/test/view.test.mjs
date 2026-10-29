@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 
 import { createClock, hourStart } from '../reader/clock.mjs'
 import { assignColours, buildView } from '../reader/view.mjs'
@@ -110,6 +111,28 @@ test('past eight projects at once, the quietest ones go uncoloured', () => {
   assert.deepEqual(new Set(Object.values(book)).size, 8)
 })
 
+test('a busy newcomer is coloured though every slot is held: the quietest active project gives its slot up', () => {
+  const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+  const book = Object.fromEntries(names.map((name, i) => [name, i]))
+  const active = [{ name: 'zbusy', commits: 100 }, ...names.map((name) => ({ name, commits: 1 }))]
+
+  const next = assignColours(active, book)
+
+  assert.equal(next.zbusy, 7)
+  assert.equal(next.h, undefined)
+  assert.deepEqual(names.slice(0, 7).map((name) => next[name]), [0, 1, 2, 3, 4, 5, 6])
+})
+
+test('in the view, only the eight busiest projects are coloured, whatever the book says', () => {
+  const commits = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].flatMap((name, i) =>
+    Array.from({ length: 9 - i }, (_, k) => at(`2026-03-10T0${k}:00:00Z`, name)),
+  )
+  const { view: v } = view(commits, { now: '2026-03-10T11:40:00Z', colours: { i: 3, x: 3 } })
+
+  assert.equal(v.projects.find((each) => each.name === 'i').slot, null)
+  assert.equal(new Set(v.projects.map((each) => each.slot).filter((slot) => slot !== null)).size, 8)
+})
+
 test('the colours in the view come from the book, and the book comes back with any new ones', () => {
   const { view: v, colours } = view([at('2026-03-10T08:00:00Z', 'alpha'), at('2026-03-10T09:00:00Z', 'beta')], {
     now: '2026-03-10T11:40:00Z',
@@ -124,4 +147,17 @@ test('the clock gives the local day and hour', () => {
   const clock = createClock('Europe/Berlin')
 
   assert.deepEqual(clock(ms('2026-03-09T23:30:00Z')), { day: '2026-03-10', hour: 0 })
+})
+
+test('with TZ set but empty, the reader falls back to UTC instead of failing', () => {
+  const clock = new URL('../reader/clock.mjs', import.meta.url).href
+  const ran = spawnSync(process.execPath, ['--input-type=module', '-e', `import { systemTimeZone } from '${clock}'; console.log(systemTimeZone())`], {
+    encoding: 'utf8',
+    env: { ...process.env, TZ: '' },
+  })
+
+  const zone = ran.stdout.trim()
+  assert.equal(ran.status, 0, ran.stderr)
+  assert.doesNotThrow(() => new Intl.DateTimeFormat('en', { timeZone: zone }))
+  assert.notEqual(zone, '')
 })

@@ -7,13 +7,19 @@ export const DAYS = 7
 /** Distinct colours a project can hold; the pane's palette has this many. */
 export const SLOTS = 8
 
+const byCommits = (a, b) => b.commits - a.commits || a.name.localeCompare(b.name)
+
+/** The projects that are coloured: the `slots` with the most commits. */
+const coloured = (active, slots) => [...active].sort(byCommits).slice(0, slots)
+
 /**
- * Gives each active project a colour slot it keeps from one view to the next.
- * A project keeps the slot the book gave it unless another active project
- * already holds that one; a project without one takes the lowest slot that no
- * project in the book holds, else the lowest no active project holds. Past
- * `slots` active projects, the ones with the fewest commits get none.
- * @param {{ name: string, commits: number }[]} active most commits first
+ * Gives each of the busiest active projects a colour slot it keeps from one
+ * view to the next. Past `slots` active projects, the ones with the fewest
+ * commits get none. A coloured project keeps the slot the book gave it unless
+ * another coloured project already holds that one; one without a slot takes the
+ * lowest slot no project in the book holds, else one only a project that is
+ * not coloured now holds, which then gives it up.
+ * @param {{ name: string, commits: number }[]} active
  * @param {Record<string, number>} book project -> slot, from earlier views
  * @returns {Record<string, number>} the book with every change made
  */
@@ -21,20 +27,18 @@ export function assignColours(active, book, slots = SLOTS) {
   const next = { ...book }
   const taken = new Set()
   const waiting = []
-  for (const project of [...active].sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const project of coloured(active, slots).sort((a, b) => a.name.localeCompare(b.name))) {
     const slot = next[project.name]
     if (Number.isInteger(slot) && slot >= 0 && slot < slots && !taken.has(slot)) taken.add(slot)
     else waiting.push(project)
   }
-  waiting.sort((a, b) => b.commits - a.commits || a.name.localeCompare(b.name))
-  for (const project of waiting) {
+  for (const project of waiting.sort(byCommits)) {
     delete next[project.name]
     const held = new Set(Object.values(next))
     let slot = -1
     for (let i = 0; i < slots && slot === -1; i += 1) if (!taken.has(i) && !held.has(i)) slot = i
+    // There are never more coloured projects than slots, so one is always free of them.
     for (let i = 0; i < slots && slot === -1; i += 1) if (!taken.has(i)) slot = i
-    if (slot === -1) continue
-    // A dormant project whose slot is taken over gives it up.
     for (const [name, value] of Object.entries(next)) if (value === slot) delete next[name]
     next[project.name] = slot
     taken.add(slot)
@@ -89,8 +93,9 @@ export function buildView({ commits, now, zone, sessions, plan, colours, refresh
     }
   }
 
-  const active = [...perProject].map(([name, n]) => ({ name, commits: n })).sort((a, b) => b.commits - a.commits || a.name.localeCompare(b.name))
+  const active = [...perProject].map(([name, n]) => ({ name, commits: n })).sort(byCommits)
   const book = assignColours(active, colours)
+  const isColoured = new Set(coloured(active, SLOTS).map((each) => each.name))
 
   return {
     colours: book,
@@ -105,7 +110,7 @@ export function buildView({ commits, now, zone, sessions, plan, colours, refresh
       totals: { commitsToday, linesToday, commits7d, projectsToday: projectsToday.size, projects7d: active.length },
       hours,
       days,
-      projects: active.map(({ name, commits: n }) => ({ name, commits: n, slot: Number.isInteger(book[name]) ? book[name] : null })),
+      projects: active.map(({ name, commits: n }) => ({ name, commits: n, slot: isColoured.has(name) && Number.isInteger(book[name]) ? book[name] : null })),
       sessions,
       plan,
       repos,
