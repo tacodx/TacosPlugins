@@ -1,0 +1,41 @@
+{
+   "k10temp-pci-00c3":{
+      "Adapter": "PCI adapter",
+      "Tctl":{
+         "temp1_input": 52.500
+      },
+      "Tccd1":{
+         "temp3_input": 48.250
+      }
+   },
+   "nvme-pci-0100":{
+      "Adapter": "PCI adapter",
+      "Composite":{
+         "temp1_input": 41.850,
+         "temp1_max": 81.850,
+         "temp1_crit": 85.850
+      }
+   },
+   "amdgpu-pci-2d00":{
+      "Adapter": "PCI adapter",
+      "vddgfx":{
+         "in0_input": 0.712
+      },
+      "fan1":{
+         "fan1_input": 0.000,
+         "fan1_max": 5000.000
+      },
+      "edge":{
+         "temp1_input": 55.000,
+         "temp1_crit": 110.000
+      },
+      "junction":{
+         "temp2_input": 61.000,
+         "temp2_crit": 110.000
+      },
+      "mem":{
+         "temp3_input": 58.000,
+         "temp3_crit": 108.000
+      }
+   }
+}
