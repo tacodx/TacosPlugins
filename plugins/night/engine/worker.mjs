@@ -63,13 +63,14 @@ export function clearStaleIndexLock(worktree, { now = Date.now() } = {}) {
  * Runs Claude once and resolves with its stream lines and exit. While it runs,
  * `watch` is called every few seconds and may return a reason to stop it.
  */
-export function runClaude({ claude, args, cwd, env, streamPath, watch, onLine, intervalMs = 5000 }) {
+export function runClaude({ claude, args, cwd, env, streamPath, watch, onLine, onSpawn, intervalMs = 5000 }) {
   return new Promise((resolve) => {
     const lines = []
     let buffer = ''
     let lastOutput = Date.now()
     let stopping = null
     const child = spawn(claude, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+    onSpawn?.(child.pid)
     const killGroup = (signal) => {
       try { process.kill(-child.pid, signal) } catch { /* gone */ }
     }
@@ -210,6 +211,7 @@ export async function workerTurn(slot, { paths, deps }) {
     cwd: place.worktree,
     env,
     streamPath: wp.stream,
+    onSpawn: (pid) => save({ childPid: pid }),
     watch: ({ lastOutput }) => {
       if (isPaused(files, slot)) return 'paused'
       if (!RUNNING.has(readCurrent(paths).phase)) return 'stop'

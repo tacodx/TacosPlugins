@@ -15,6 +15,7 @@ import { arm, canary, dawn, disarm, dusk, install, keep, machine, recapInput, st
 import { conductorTurn, healthTurn, logsTurn, medicTurn, serviceLoop, usageTurn } from '../engine/services.mjs'
 import { readCurrent } from '../engine/state.mjs'
 import { liveDeps, workerLoop } from '../engine/worker.mjs'
+import { chaos } from '../engine/chaos.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const GUARD = join(HERE, 'guard.mjs')
@@ -153,6 +154,14 @@ export async function main(argv, env = process.env) {
       out({ ok: problems.length === 0, problems })
       return problems.length ? 1 : 0
     }
+    case 'chaos':
+      try {
+        out({ ok: true, report: await chaos(paths, m, { only: rest.length ? rest : undefined }) })
+        return 0
+      } catch (err) {
+        out({ ok: false, error: String(err?.message ?? err) })
+        return 1
+      }
     case 'install': out({ ok: true, changed: await install(paths, m, installArgs(env)) }); return 0
     case 'uninstall': out({ ok: true, removed: await uninstall(paths, m) }); return 0
     case 'doctor': out(doctor(paths, env)); return 0
