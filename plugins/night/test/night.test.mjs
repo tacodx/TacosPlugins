@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { nightFiles, nightPaths } from '../engine/config.mjs'
 import { readJsonl, writeJson } from '../engine/fsx.mjs'
-import { arm, canary, dawn, disarm, dusk, keep, stop, view } from '../engine/night.mjs'
+import { arm, canary, dawn, disarm, dusk, keep, requestStop, stop, view } from '../engine/night.mjs'
 import { addPlan, claim, emptyQueue, readQueue } from '../engine/queue.mjs'
 import { readCurrent, writeCurrent } from '../engine/state.mjs'
 import { tempDir } from './helpers.mjs'
@@ -38,6 +38,13 @@ function fakeMachine(t, { now = EVENING } = {}) {
 
 const has = (calls, ...words) => calls.some((c) => words.every((w) => c.includes(w)))
 
+/** Arms a night inside its window and lets its dusk timer fire. */
+async function armAndRun(s) {
+  await arm(s.paths, s.m)
+  s.set(s.m.now() + 11_000)
+  await dusk(s.paths, s.m, { node: process.execPath, guard: s.guardOk })
+}
+
 test('arming in the evening sets exact UTC timers for tonight and enables them', async (t) => {
   const s = fakeMachine(t)
   const current = await arm(s.paths, s.m)
@@ -50,11 +57,14 @@ test('arming in the evening sets exact UTC timers for tonight and enables them',
   assert.ok(!has(s.calls, 'start', 'night.target'))
 })
 
-test('arming inside the window runs dusk at once', async (t) => {
+test('arming inside the window hands dusk to its timer ten seconds out, so the call returns at once', async (t) => {
   const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
-  await arm(s.paths, s.m)
-  assert.equal(readCurrent(s.paths).phase, 'night')
-  assert.ok(has(s.calls, 'start', 'night.target'))
+  const current = await arm(s.paths, s.m)
+  assert.equal(current.phase, 'armed')
+  assert.equal(current.start, Date.parse('2026-03-11T01:00:10Z'))
+  assert.match(readFileSync(join(s.paths.units, 'night-dusk.timer'), 'utf8'), /OnCalendar=2026-03-11 01:00:10 UTC/)
+  assert.ok(!has(s.calls, 'start', 'night.target'))
+  await armAndRun({ ...s, m: s.m })
 })
 
 test('dusk runs every step on its own, records it, and starts the night\'s services', async (t) => {
@@ -77,7 +87,7 @@ test('a guard that lets a push through marks the night unsafe and says so', asyn
   const leaky = join(s.home, 'leaky.sh')
   writeFileSync(leaky, '#!/bin/sh\nexit 0\n')
   await arm(s.paths, s.m)
-  writeCurrent(s.paths, { ...readCurrent(s.paths), phase: 'armed' })
+  s.set(s.m.now() + 11_000)
   await dusk(s.paths, s.m, { node: '/bin/sh', guard: leaky })
   assert.deepEqual(readCurrent(s.paths).unsafe, ['the guard hook did not deny a git push'])
   assert.ok(has(s.calls, 'notify'))
@@ -118,7 +128,7 @@ test('the keeper runs a missed dusk, keeps the target up, stops spare workers an
 
 test('dawn brings the machine back, keeps sleep blocked, and the night goes on as day', async (t) => {
   const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
-  await arm(s.paths, s.m)
+  await armAndRun(s)
   s.calls.length = 0
   await dawn(s.paths, s.m)
   assert.equal(readCurrent(s.paths).phase, 'day')
@@ -128,7 +138,7 @@ test('dawn brings the machine back, keeps sleep blocked, and the night goes on a
 
 test('stop writes stopped first, ends the services, restores the machine, and gives items back', async (t) => {
   const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
-  await arm(s.paths, s.m)
+  await armAndRun(s)
   const date = readCurrent(s.paths).date
   let q = addPlan(emptyQueue(date), { name: 'alpha', repo: '/r', base: 'b', rank: 0 }, { items: [{ title: 'x' }] }, 0).queue
   q = claim(q, q.items[0].id, { slot: 1, now: 0 })
@@ -160,14 +170,14 @@ test('arming twice while a night runs is refused; disarming an armed night remov
   assert.equal(readCurrent(s.paths).phase, 'idle')
   assert.ok(!existsSync(join(s.paths.units, 'night-dusk.timer')))
   s.set(Date.parse('2026-03-11T01:00:00Z'))
-  await arm(s.paths, s.m)
+  await armAndRun(s)
   await assert.rejects(arm(s.paths, s.m), /running/)
   await assert.rejects(disarm(s.paths, s.m), /stop/)
 })
 
 test('the view tells the pane the phase, the window, each worker and the queue', async (t) => {
   const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
-  await arm(s.paths, s.m)
+  await armAndRun(s)
   const v = view(s.paths, s.m)
   assert.equal(v.phase, 'night')
   assert.deepEqual(v.window, { from: '23:30', to: '06:30' })
@@ -179,7 +189,7 @@ test('the view tells the pane the phase, the window, each worker and the queue',
 
 test('dawn runs once: a timer that fires again changes nothing', async (t) => {
   const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
-  await arm(s.paths, s.m)
+  await armAndRun(s)
   await dawn(s.paths, s.m)
   s.calls.length = 0
   let recaps = 0
@@ -193,4 +203,16 @@ test('before any night the view lists the open projects from the notes', async (
   const v = view(s.paths, s.m)
   assert.deepEqual(v.projects, [])
   assert.equal(v.phase, 'idle')
+})
+
+test('Stop from the pane marks the night stopped at once and leaves the slow part to night-stop.service', async (t) => {
+  const s = fakeMachine(t, { now: Date.parse('2026-03-11T01:00:00Z') })
+  await armAndRun(s)
+  s.calls.length = 0
+  const current = await requestStop(s.paths, s.m)
+  assert.equal(current.phase, 'stopped')
+  assert.deepEqual(s.calls, [['systemctl', 'start', '--no-block', 'night-stop.service']])
+  await stop(s.paths, s.m)
+  assert.equal(readCurrent(s.paths).stopping, false)
+  assert.ok(has(s.calls, 'stop', 'night.target'))
 })

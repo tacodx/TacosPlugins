@@ -24,6 +24,7 @@ export const UNIT_NAMES = Object.freeze([
   'night-inhibit.service',
   'night-dusk.service',
   'night-dawn.service',
+  'night-stop.service',
   'night-keeper.service',
   'night-keeper.timer',
 ])
@@ -127,10 +128,10 @@ export function buildUnits({ node, cli, sessions, memoryHigh, memoryMax, pathEnv
       'Restart=always', 'RestartSec=10', ...environment,
     ],
   })
-  for (const [step, what] of [['dusk', 'starts the night'], ['dawn', 'ends the night']]) {
+  for (const [step, what, verb] of [['dusk', 'starts the night', 'dusk'], ['dawn', 'ends the night', 'dawn'], ['stop', 'stops the night when the owner presses Stop', 'stop-now']]) {
     units[`night-${step}.service`] = render(`the one-shot that ${what}`, {
       Unit: [`Description=Night ${step}`],
-      Service: ['Type=oneshot', night(step), 'TimeoutStartSec=15min', 'WorkingDirectory=%h', ...environment],
+      Service: ['Type=oneshot', night(verb), 'TimeoutStartSec=20min', 'WorkingDirectory=%h', ...environment],
     })
   }
   units['night-keeper.service'] = render('the one-shot that brings a night in progress back after a reboot or a crash', {

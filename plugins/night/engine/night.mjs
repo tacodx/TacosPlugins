@@ -182,12 +182,14 @@ export async function arm(paths, m, { startNow = false } = {}) {
   const planned = startNow
     ? { start: now, end: nextAt(config.window.to, now, m.zone), date: localDate(now, m.zone), inside: true }
     : planNight(config.window, now, m.zone)
+  // A night that starts now is handed to the dusk timer ten seconds out, so the
+  // pane's call returns at once and dusk runs as its own systemd unit.
+  const start = planned.inside ? now + 10_000 : planned.start
   const current = writeCurrent(paths, {
-    phase: 'armed', date: planned.date, start: planned.start, end: planned.end, window: config.window, armedAt: now, steps: {},
+    phase: 'armed', date: planned.date, start, end: planned.end, window: config.window, armedAt: now, steps: {},
   })
   await writeTimers(paths, current, m)
   addEvent(nightFiles(paths, current.date), 'armed', { start: new Date(current.start).toISOString(), end: new Date(current.end).toISOString() }, now)
-  if (planned.inside) await dusk(paths, m)
   return readCurrent(paths)
 }
 
@@ -239,12 +241,24 @@ export async function dawn(paths, m, { recap, force = false } = {}) {
   return next
 }
 
+/**
+ * The owner pressed Stop: the night is marked stopped at once, so nothing restarts
+ * any part of it, and the slow rest runs as night-stop.service.
+ */
+export async function requestStop(paths, m) {
+  const current = readCurrent(paths)
+  if (!current.date || current.phase === 'idle') return current
+  writeCurrent(paths, { ...current, phase: 'stopped', stoppedAt: current.stoppedAt ?? m.now(), stopping: true })
+  await m.systemctl('start', '--no-block', 'night-stop.service')
+  return readCurrent(paths)
+}
+
 /** Stop: nothing restarts any more, workers end and commit what they left, the machine is restored. */
 export async function stop(paths, m, { recap } = {}) {
   const current = readCurrent(paths)
   if (!current.date) return current
   const wasDawn = Boolean(current.dawnAt)
-  writeCurrent(paths, { ...current, phase: 'stopped', stoppedAt: m.now() })
+  writeCurrent(paths, { ...current, phase: 'stopped', stoppedAt: current.stoppedAt ?? m.now() })
   const files = nightFiles(paths, current.date)
   addEvent(files, 'stop', {}, m.now())
   await m.systemctl('stop', 'night.target')
@@ -261,7 +275,7 @@ export async function stop(paths, m, { recap } = {}) {
   removeUnits(paths.units, TIMER_NAMES)
   removeCleanWorktrees(paths, current.date)
   if (recap) await recap(paths, m)
-  return readCurrent(paths)
+  return updateCurrent(paths, (c) => ({ ...c, stopping: false }))
 }
 
 /** Removes the night's worktrees that hold no uncommitted work; their branches stay. */

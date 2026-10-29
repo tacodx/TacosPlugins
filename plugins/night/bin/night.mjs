@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { localTime } from '../engine/clock.mjs'
 import { loadConfig, nightFiles, nightPaths, saveConfig } from '../engine/config.mjs'
 import { readJson, writeJson, writeText } from '../engine/fsx.mjs'
-import { arm, canary, dawn, disarm, dusk, install, keep, machine, recapInput, stop, uninstall, view } from '../engine/night.mjs'
+import { arm, canary, dawn, disarm, dusk, install, keep, machine, recapInput, requestStop, stop, uninstall, view } from '../engine/night.mjs'
 import { conductorTurn, healthTurn, logsTurn, medicTurn, serviceLoop, usageTurn } from '../engine/services.mjs'
 import { readCurrent } from '../engine/state.mjs'
 import { liveDeps, workerLoop } from '../engine/worker.mjs'
@@ -142,7 +142,8 @@ export async function main(argv, env = process.env) {
     case 'arm': return act(async () => { await ensureInstalled(paths, m, env); await arm(paths, m) })
     case 'start': return act(async () => { await ensureInstalled(paths, m, env); await arm(paths, m, { startNow: true }) })
     case 'disarm': return act(() => disarm(paths, m))
-    case 'stop': return act(() => stop(paths, m, { recap }))
+    case 'stop': return act(() => (existsSync(join(paths.units, 'night-stop.service')) ? requestStop(paths, m) : stop(paths, m, { recap })))
+    case 'stop-now': await stop(paths, m, { recap }); return 0
     case 'dusk': await dusk(paths, m, { guard: GUARD }); return 0
     case 'dawn': await dawn(paths, m, { recap }); return 0
     case 'keep': await keep(paths, m, { guard: GUARD, recap }); return 0

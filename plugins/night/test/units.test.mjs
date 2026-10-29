@@ -111,7 +111,7 @@ test('dusk and dawn are oneshots the medic retries, the keeper runs on a timer',
     const text = units[`night-${step}.service`]
     assert.equal(value(text, 'Type'), 'oneshot')
     assert.equal(value(text, 'ExecStart'), `${base.node} ${base.cli} ${step}`)
-    assert.equal(value(text, 'TimeoutStartSec'), '15min')
+    assert.equal(value(text, 'TimeoutStartSec'), '20min')
     assert.equal(value(text, 'Restart'), undefined)
   }
   const keeper = units['night-keeper.service']
