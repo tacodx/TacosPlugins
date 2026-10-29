@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import { DEFAULTS } from '../engine/config.mjs'
 import {
-  freezePlan, parseMeminfo, parsePsi, parseSensors, runCommand, sampleHealth, verdict,
+  pausePlan, parseMeminfo, parsePsi, parseSensors, runCommand, sampleHealth, verdict,
 } from '../engine/health.mjs'
 import { at } from './helpers.mjs'
 
@@ -256,66 +256,66 @@ test('the thresholds come from the config and can be changed', () => {
   assert.deepEqual(verdict(calm), verdict(calm, T), 'the defaults apply when none are given')
 })
 
-// ---- freezePlan ----
+// ---- pausePlan ----
 
 const bad = { blockers: [{ code: 'swap-full', text: 'Swap is 97 % full.' }], warnings: [], thrash: false, blockTests: false, hot: false }
 const thrashing = { blockers: [], warnings: [{ code: 'thrash', text: 'x' }], thrash: true, blockTests: false, hot: false }
 const fine = { blockers: [], warnings: [], thrash: false, blockTests: false, hot: false }
 const MIN2 = 120_000
 const ago = (ms) => at() - ms
-const plan = (change) => freezePlan({
-  verdict: bad, workers: [], frozen: [], lastActionAt: null, clearSince: null, now: at(), ...change,
+const plan = (change) => pausePlan({
+  verdict: bad, workers: [], paused: [], lastActionAt: null, clearSince: null, now: at(), ...change,
 })
 
-test('under a blocker the most recently started worker is frozen first', () => {
-  const workers = [{ slot: 1, startedAt: ago(5000) }, { slot: 2, startedAt: ago(1000) }, { slot: 3, startedAt: ago(3000) }]
-  assert.deepEqual(plan({ workers }), { action: 'freeze', slot: 2 })
+test('under a blocker the most recently started worker is paused first', () => {
+  const workers = [{ slot: 1, bytes: ago(5000) }, { slot: 2, bytes: ago(1000) }, { slot: 3, bytes: ago(3000) }]
+  assert.deepEqual(plan({ workers }), { action: 'pause', slot: 2 })
 })
 
-test('thrash freezes too, even with no blocker', () => {
-  assert.deepEqual(plan({ verdict: thrashing, workers: [{ slot: 4, startedAt: ago(10) }] }), { action: 'freeze', slot: 4 })
+test('thrash pauses too, even with no blocker', () => {
+  assert.deepEqual(plan({ verdict: thrashing, workers: [{ slot: 4, bytes: ago(10) }] }), { action: 'pause', slot: 4 })
 })
 
-test('a warning alone, such as disk-low or hot, freezes nothing', () => {
+test('a warning alone, such as disk-low or hot, pauses nothing', () => {
   const warned = { ...fine, warnings: [{ code: 'hot', text: 'x' }], hot: true }
-  assert.equal(plan({ verdict: warned, workers: [{ slot: 1, startedAt: ago(10) }] }).action, 'none')
+  assert.equal(plan({ verdict: warned, workers: [{ slot: 1, bytes: ago(10) }] }).action, 'none')
 })
 
-test('only one freeze every two minutes', () => {
-  const workers = [{ slot: 1, startedAt: ago(9000) }, { slot: 2, startedAt: ago(8000) }]
+test('only one pause every two minutes', () => {
+  const workers = [{ slot: 1, bytes: ago(9000) }, { slot: 2, bytes: ago(8000) }]
   assert.deepEqual(plan({ workers, lastActionAt: ago(MIN2 - 1) }), { action: 'none', slot: null })
-  assert.deepEqual(plan({ workers, lastActionAt: ago(MIN2) }), { action: 'freeze', slot: 2 })
+  assert.deepEqual(plan({ workers, lastActionAt: ago(MIN2) }), { action: 'pause', slot: 2 })
 })
 
-test('while it lasts it freezes down to the last worker, then there is nothing left to freeze', () => {
-  const one = [{ slot: 1, startedAt: ago(9000) }]
-  assert.deepEqual(plan({ workers: one, lastActionAt: ago(MIN2 * 3) }), { action: 'freeze', slot: 1 })
-  assert.deepEqual(plan({ workers: [], frozen: [{ slot: 1, frozenAt: ago(5) }], lastActionAt: ago(MIN2 * 3) }), { action: 'none', slot: null })
+test('while it lasts it pauses down to the last worker, then there is nothing left to pause', () => {
+  const one = [{ slot: 1, bytes: ago(9000) }]
+  assert.deepEqual(plan({ workers: one, lastActionAt: ago(MIN2 * 3) }), { action: 'pause', slot: 1 })
+  assert.deepEqual(plan({ workers: [], paused: [{ slot: 1, pausedAt: ago(5) }], lastActionAt: ago(MIN2 * 3) }), { action: 'none', slot: null })
 })
 
-test('a frozen worker is not thawed while the verdict is bad', () => {
-  const frozen = [{ slot: 2, frozenAt: ago(MIN2 * 5) }]
-  assert.equal(plan({ workers: [], frozen, lastActionAt: ago(MIN2 * 5), clearSince: ago(MIN2 * 5) }).action, 'none')
+test('a paused worker is not resumed while the verdict is bad', () => {
+  const paused = [{ slot: 2, pausedAt: ago(MIN2 * 5) }]
+  assert.equal(plan({ workers: [], paused, lastActionAt: ago(MIN2 * 5), clearSince: ago(MIN2 * 5) }).action, 'none')
 })
 
-test('after two clear minutes the most recently frozen worker thaws first', () => {
-  const frozen = [{ slot: 1, frozenAt: ago(MIN2 * 4) }, { slot: 3, frozenAt: ago(MIN2 * 2) }, { slot: 2, frozenAt: ago(MIN2 * 3) }]
-  const clear = { verdict: fine, frozen, lastActionAt: ago(MIN2 * 2), clearSince: ago(MIN2) }
-  assert.deepEqual(plan(clear), { action: 'thaw', slot: 3 })
+test('after two clear minutes the most recently paused worker resumes first', () => {
+  const paused = [{ slot: 1, pausedAt: ago(MIN2 * 4) }, { slot: 3, pausedAt: ago(MIN2 * 2) }, { slot: 2, pausedAt: ago(MIN2 * 3) }]
+  const clear = { verdict: fine, paused, lastActionAt: ago(MIN2 * 2), clearSince: ago(MIN2) }
+  assert.deepEqual(plan(clear), { action: 'resume', slot: 3 })
 })
 
-test('a verdict clear for less than two minutes, or of unknown age, thaws nothing', () => {
-  const clear = { verdict: fine, frozen: [{ slot: 1, frozenAt: ago(MIN2 * 9) }], lastActionAt: ago(MIN2 * 9) }
+test('a verdict clear for less than two minutes, or of unknown age, resumes nothing', () => {
+  const clear = { verdict: fine, paused: [{ slot: 1, pausedAt: ago(MIN2 * 9) }], lastActionAt: ago(MIN2 * 9) }
   assert.equal(plan({ ...clear, clearSince: ago(MIN2 - 1) }).action, 'none')
   assert.equal(plan({ ...clear, clearSince: null }).action, 'none')
 })
 
-test('thawing is one worker every two minutes too', () => {
-  const clear = { verdict: fine, frozen: [{ slot: 1, frozenAt: ago(MIN2 * 9) }], clearSince: ago(MIN2 * 4) }
+test('resuming is one worker every two minutes too', () => {
+  const clear = { verdict: fine, paused: [{ slot: 1, pausedAt: ago(MIN2 * 9) }], clearSince: ago(MIN2 * 4) }
   assert.deepEqual(plan({ ...clear, lastActionAt: ago(MIN2 - 1) }), { action: 'none', slot: null })
-  assert.deepEqual(plan({ ...clear, lastActionAt: ago(MIN2) }), { action: 'thaw', slot: 1 })
+  assert.deepEqual(plan({ ...clear, lastActionAt: ago(MIN2) }), { action: 'resume', slot: 1 })
 })
 
-test('with nothing running, nothing frozen and a calm verdict there is nothing to do', () => {
+test('with nothing running, nothing paused and a calm verdict there is nothing to do', () => {
   assert.deepEqual(plan({ verdict: fine, clearSince: ago(MIN2 * 9) }), { action: 'none', slot: null })
 })

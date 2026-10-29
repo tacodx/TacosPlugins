@@ -1,6 +1,6 @@
 // What the health watcher knows: the readings of the machine and what they mean.
 //
-// The parsers, `verdict` and `freezePlan` are pure: text or numbers in, numbers or a
+// The parsers, `verdict` and `pausePlan` are pure: text or numbers in, numbers or a
 // decision out. `sampleHealth` and `runCommand` are the only parts that touch the
 // machine, and every reader is injectable. A reader that fails gives null for its
 // fields and never throws, because a watcher that dies on a missing sensor is blind
@@ -12,8 +12,8 @@ import { homedir } from 'node:os'
 import { DEFAULTS } from './config.mjs'
 
 const GB = 1e9
-const FREEZE_EVERY_MS = 120_000
-const THAW_AFTER_CLEAR_MS = 120_000
+const PAUSE_EVERY_MS = 120_000
+const RESUME_AFTER_CLEAR_MS = 120_000
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v)
 
@@ -114,7 +114,7 @@ export function sampleHealth({
 }
 
 /**
- * What a sample means. A blocker stops new work and freezes workers; thrash freezes
+ * What a sample means. A blocker stops new work and pauses workers; thrash pauses
  * them too; `blockTests` holds back heavy test runs; `hot` asks for the Day fan mode.
  * A reading that is missing never complains.
  */
@@ -167,23 +167,24 @@ export function verdict(sample, thresholds = DEFAULTS.health) {
 }
 
 // The element with the highest `key`; the later one wins a tie.
-const latest = (list, key) => list.reduce((best, item) => (item[key] >= best[key] ? item : best))
+const largest = (list, key) => list.reduce((best, item) => (item[key] >= best[key] ? item : best))
 
 /**
- * Whether to freeze or thaw one worker now. Under a blocker or thrash the newest
- * running worker freezes, down to none if it lasts. Once the verdict has been clear
- * for two minutes the most recently frozen one thaws. Either way, one move every two
- * minutes. `clearSince` is when the verdict last turned clear; null means it is not
- * known to be clear, so nothing thaws.
+ * Whether to pause or resume one worker now. Freezing frees no memory (zram pages
+ * stay in RAM), so under a blocker or thrash the worker using the most memory is
+ * paused: it ends its Claude run and everything under it. Down to none if it
+ * lasts. Once the verdict has been clear for two minutes the most recently paused
+ * one resumes. One move every two minutes either way. `clearSince` is when the
+ * verdict last turned clear; null means it is not known to be clear.
  */
-export function freezePlan({ verdict: v, workers, frozen, lastActionAt, clearSince, now }) {
+export function pausePlan({ verdict: v, workers, paused, lastActionAt, clearSince, now }) {
   const nothing = { action: 'none', slot: null }
-  if (isNum(lastActionAt) && now - lastActionAt < FREEZE_EVERY_MS) return nothing
+  if (isNum(lastActionAt) && now - lastActionAt < PAUSE_EVERY_MS) return nothing
   if (v.blockers.length > 0 || v.thrash) {
-    return workers.length > 0 ? { action: 'freeze', slot: latest(workers, 'startedAt').slot } : nothing
+    return workers.length > 0 ? { action: 'pause', slot: largest(workers, 'bytes').slot } : nothing
   }
-  if (frozen.length > 0 && isNum(clearSince) && now - clearSince >= THAW_AFTER_CLEAR_MS) {
-    return { action: 'thaw', slot: latest(frozen, 'frozenAt').slot }
+  if (paused.length > 0 && isNum(clearSince) && now - clearSince >= RESUME_AFTER_CLEAR_MS) {
+    return { action: 'resume', slot: largest(paused, 'pausedAt').slot }
   }
   return nothing
 }

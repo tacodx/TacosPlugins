@@ -115,7 +115,7 @@ export function dirtyPaths(dir, { run = runGit } = {}) {
  * added and removed. Merges are left out.
  */
 export function commitsSince(repo, since, { until, run = runGit } = {}) {
-  const args = ['log', '--all', '--no-merges', `--since=${new Date(since).toISOString()}`]
+  const args = ['log', '--branches', '--no-merges', `--since=${new Date(since).toISOString()}`]
   if (until) args.push(`--until=${new Date(until).toISOString()}`)
   args.push('--format=%x1e%H%x1f%at%x1f%ae%x1f%s', '--numstat')
   const out = tryGit(run, args, { cwd: repo })
