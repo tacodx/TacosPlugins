@@ -34,5 +34,5 @@ test('the root readme lists night in the plugin table', () => {
 })
 
 test('nothing in the night plugin carries an em or en dash', () => {
-  assert.doesNotMatch(readme, /[–—]/)
+  assert.doesNotMatch(readme, /[\u2013\u2014]/)
 })
