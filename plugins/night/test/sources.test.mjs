@@ -88,11 +88,11 @@ test('globs match within a folder with * and across folders with **', () => {
   assert.deepEqual(matchFiles(['TODO.md', 'src/TODO.md', 'PLAN.md'], ['TODO.md', 'PLAN.md']), ['TODO.md', 'PLAN.md'])
 })
 
-const git = (cwd, ...args) => execFileSync('git', args, {
-  cwd,
-  encoding: 'utf8',
-  env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' },
-})
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' }
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV })
+// The engine's own git calls with the same identity, so a commit night makes works on a
+// machine with no git user (a CI runner) the same as on the owner's.
+const run = (args, { cwd } = {}) => execFileSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] })
 
 function makeRepo(t) {
   const dir = join(tempDir(t), 'repo')
@@ -161,7 +161,7 @@ test('commits on the night\'s own branches can be left out', (t) => {
 test('a worktree left detached or mid-rebase is put back on its night branch with its work', (t) => {
   const repo = makeRepo(t)
   const path = join(repo, '..', 'wt-detached')
-  ensureWorktree(repo, path, 'night/x/repo', 'feature')
+  ensureWorktree(repo, path, 'night/x/repo', 'feature', { run })
   writeFileSync(join(path, 'a.txt'), 'a\n')
   git(path, 'add', '.')
   git(path, 'commit', '-q', '-m', 'on the branch')
@@ -170,7 +170,7 @@ test('a worktree left detached or mid-rebase is put back on its night branch wit
   git(path, 'add', '.')
   git(path, 'commit', '-q', '-m', 'detached work')
   writeFileSync(join(path, 'c.txt'), 'c\n')
-  ensureWorktree(repo, path, 'night/x/repo', 'feature')
+  ensureWorktree(repo, path, 'night/x/repo', 'feature', { run })
   assert.equal(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'night/x/repo')
   const log = git(path, 'log', '--format=%s').split('\n')
   assert.deepEqual(log.slice(0, 3), ['night: work left on a detached head', 'detached work', 'on the branch'])
