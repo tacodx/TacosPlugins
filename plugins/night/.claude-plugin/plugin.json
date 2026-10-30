@@ -1,0 +1,10 @@
+{
+  "name": "night",
+  "version": "0.1.0",
+  "description": "Night mode: a from-to window in which Claude Code sessions keep working while the PC is dark and quiet, with watchers that bring every part back and a recap in the morning.",
+  "author": {
+    "name": "tacodx"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

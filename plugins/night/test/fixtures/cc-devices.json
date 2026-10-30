@@ -1,0 +1,124 @@
+{
+  "devices": [
+    {
+      "uid": "0c00000000000000000000000000000000000000000000000000000000000000",
+      "name": "Made-up 16-Core Processor",
+      "type": "CPU",
+      "type_index": 1,
+      "lc_info": null,
+      "info": {
+        "channels": {},
+        "temps": {},
+        "lighting_speeds": [],
+        "temp_min": 20,
+        "temp_max": 100,
+        "profile_max_length": 17,
+        "profile_min_length": 2,
+        "model": "Made-up 16-Core Processor",
+        "thinkpad_fan_control": null,
+        "amd_gpu_overdrive": null,
+        "driver_info": {
+          "drv_type": "Kernel",
+          "name": "k10temp",
+          "version": null,
+          "locations": []
+        }
+      },
+      "status_history": []
+    },
+    {
+      "uid": "06b0000000000000000000000000000000000000000000000000000000000000",
+      "name": "amdgpu",
+      "type": "GPU",
+      "type_index": 1,
+      "lc_info": null,
+      "info": {
+        "channels": {
+          "fan1": {
+            "label": "fan1",
+            "speed_options": {
+              "min_duty": 0,
+              "max_duty": 100,
+              "fixed_enabled": true
+            }
+          }
+        },
+        "temps": {},
+        "lighting_speeds": [],
+        "temp_min": 20,
+        "temp_max": 100,
+        "profile_max_length": 17,
+        "profile_min_length": 2,
+        "model": "Made-up Radeon",
+        "thinkpad_fan_control": null,
+        "amd_gpu_overdrive": null,
+        "driver_info": {
+          "drv_type": "Kernel",
+          "name": "amdgpu",
+          "version": null,
+          "locations": []
+        }
+      },
+      "status_history": []
+    },
+    {
+      "uid": "0b0a4d0000000000000000000000000000000000000000000000000000000000",
+      "name": "nct6687",
+      "type": "Hwmon",
+      "type_index": 1,
+      "lc_info": null,
+      "info": {
+        "channels": {
+          "fan1": {
+            "label": "CPU Fan",
+            "speed_options": {
+              "min_duty": 0,
+              "max_duty": 100,
+              "fixed_enabled": true
+            }
+          },
+          "fan2": {
+            "label": "Pump Fan",
+            "speed_options": {
+              "min_duty": 0,
+              "max_duty": 100,
+              "fixed_enabled": true
+            }
+          },
+          "fan6": {
+            "label": "System Fan #4",
+            "speed_options": {
+              "min_duty": 0,
+              "max_duty": 100,
+              "fixed_enabled": true
+            }
+          },
+          "fan7": {
+            "label": "System Fan #5",
+            "speed_options": {
+              "min_duty": 0,
+              "max_duty": 100,
+              "fixed_enabled": true
+            }
+          }
+        },
+        "temps": {},
+        "lighting_speeds": [],
+        "temp_min": 20,
+        "temp_max": 100,
+        "profile_max_length": 17,
+        "profile_min_length": 2,
+        "model": null,
+        "thinkpad_fan_control": null,
+        "amd_gpu_overdrive": null,
+        "driver_info": {
+          "drv_type": "Kernel",
+          "name": "nct6687",
+          "version": null,
+          "locations": []
+        }
+      },
+      "status_history": []
+    }
+  ]
+}
