@@ -6,3 +6,6 @@ node_modules/
 # Written beside a mod by Claude Code each time it loads one from this folder.
 plugins/*/.claude-plugin/types/
 plugins/*/tsconfig.json
+
+# State oh-my-claudecode keeps beside whatever folder a session runs in.
+.omc/

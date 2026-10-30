@@ -55,6 +55,19 @@
         "systemd",
         "mod"
       ]
+    },
+    {
+      "name": "board",
+      "source": "./plugins/board",
+      "version": "0.1.0",
+      "description": "A live board beside the chat: commits per hour and per project, the sessions working now, and your plan. A mod: needs Claude Code 2.1.292 or newer.",
+      "category": "productivity",
+      "tags": [
+        "git",
+        "sessions",
+        "dashboard",
+        "mod"
+      ]
     }
   ]
 }

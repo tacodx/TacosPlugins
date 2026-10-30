@@ -1,0 +1,10 @@
+{
+  "name": "board",
+  "version": "0.1.0",
+  "description": "A live board beside the chat: commits per hour and per project, the sessions working now, and your plan.",
+  "author": {
+    "name": "tacodx"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

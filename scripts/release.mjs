@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** Plugins that import nothing from packages/core, and so carry no vendored lib/. */
-export const STANDALONE_PLUGINS = ['reflect', 'night']
+export const STANDALONE_PLUGINS = ['reflect', 'night', 'board']
 
 /** The plugins under pluginsDir that packages/core is vendored into. */
 export function vendoredPlugins(pluginsDir) {
