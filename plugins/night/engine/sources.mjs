@@ -110,7 +110,7 @@ export function parseRoadmapRows(text) {
   return rows
 }
 
-/** The roadmap row a note stands for: "Session 5 Build slait.io" is row 5. */
+/** The roadmap row a note stands for: "Session 5 Build the site" is row 5. */
 export function rowForNote(noteName, rows) {
   const match = /^Session\s+(\S+)\s/i.exec(noteName)
   if (!match) return null

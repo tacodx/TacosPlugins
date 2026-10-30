@@ -23,7 +23,7 @@ hand, and each one lost work a different way:
 
 The owner's words: one from-to window set in the tool; RGB off, fans and power down, screens off at "from"; watchers
 for health, logs and errors; something that fixes sessions that stop; sessions working until the project is done or
-he interrupts them; and in the morning one calm recap he can open anywhere, with what each session did, what is done
+they interrupt them; and in the morning one calm recap they can open anywhere, with what each session did, what is done
 and left per project, the % done and the % gained overnight.
 
 ## 2. What this plugin does
@@ -271,7 +271,7 @@ Each is its own service with a heartbeat. Verdicts are pure functions of samples
   removed), the queue's results and each worker's `NIGHT-RESULT` lines, desktop sessions' commits on their
   branches, % done at dusk and now, and the events.
 - `recap.html`, one calm page: a row of four numbers (commits, lines, items done, sessions), then one line per
-  project ("Slait site, 40 % to 58 %, +18"), then commits per hour across the night, commits per project, and per
+  project ("site, 40 % to 58 %, +18"), then commits per hour across the night, commits per project, and per
   session at most two lines (what it did, which branch). Health is one line unless something happened. What needs
   the owner is one short line at the bottom, never a list or a card.
 - Written every hour for the pane, and at dawn and on Stop. At dawn and on Stop a headless `claude -p --model
@@ -322,7 +322,7 @@ credential helper), and a script or alias can push. Spikes on 2.1.308 confirmed 
 
 ### 8.2 Workers do not inherit the owner's setup
 
-The owner's user settings carry a Stop hook that asks every session to edit his project notes, plugins with
+The owner's user settings carry a Stop hook that asks every session to edit their project notes, plugins with
 skills that ask questions, and claude-mem's observers. Workers run with `--setting-sources project,local
 --disable-slash-commands --strict-mcp-config`. A spike confirmed the worker then sees none of the owner's user
 instructions, plugins or skills. Attribution is off in the worker settings (`includeCoAuthoredBy: false`).

@@ -125,8 +125,8 @@ test('watchers, usage, and the one line for the owner', () => {
 })
 
 test('a recap line names its project once', () => {
-  assert.equal(recapLine({ name: 'slait', line: '40 % to 58 %, +18' }), 'slait, 40 % to 58 %, +18')
-  assert.equal(recapLine({ name: 'slait', line: 'slait, 40 % to 58 %, +18' }), 'slait, 40 % to 58 %, +18')
+  assert.equal(recapLine({ name: 'site', line: '40 % to 58 %, +18' }), 'site, 40 % to 58 %, +18')
+  assert.equal(recapLine({ name: 'site', line: 'site, 40 % to 58 %, +18' }), 'site, 40 % to 58 %, +18')
 })
 
 test('the summary shows watchers and the queue only while a night runs or has work', () => {

@@ -98,7 +98,7 @@ Then list up to 6 items for tonight (items), in the order they should be done. E
 - task: the id of the map task it advances, or null.
 - decisionFree: true only if the worker can finish it with no decision from the owner.
 
-Only include items that need no decision from the owner. Leave out anything that needs his approval or taste (design choices, copy he approves, prices, names), sending or publishing anything, accounts, money, legal questions, contacting people, deploying, or work outside the repository. Prefer the next open steps of the plan; when the plan is done or blocked on the owner, choose work that always helps: tests for untested code, accessibility, empty and error states, documentation of how to run the project, performance, and clean-ups the plan or notes ask for. Never invent new features the notes do not ask for. If nothing qualifies, return an empty items list.
+Only include items that need no decision from the owner. Leave out anything that needs their approval or taste (design choices, copy they approve, prices, names), sending or publishing anything, accounts, money, legal questions, contacting people, deploying, or work outside the repository. Prefer the next open steps of the plan; when the plan is done or blocked on the owner, choose work that always helps: tests for untested code, accessibility, empty and error states, documentation of how to run the project, performance, and clean-ups the plan or notes ask for. Never invent new features the notes do not ask for. If nothing qualifies, return an empty items list.
 
 ${text}`
 }

@@ -76,7 +76,7 @@ export function stateWords(worker, zone) {
   return 'off'
 }
 
-/** One worker in one line: "1. slait: Add the login form, working". */
+/** One worker in one line: "1. site: Add the login form, working". */
 export function workerLine(worker, zone) {
   const state = stateWords(worker, zone)
   if (!worker.project) return `${worker.slot}. ${state}`
@@ -140,7 +140,7 @@ export function attention(view) {
   return rest.length === 0 ? first : `${first} (and ${rest.length} more)`
 }
 
-/** A recap's project line: "slait, 40 % to 58 %, +18". */
+/** A recap's project line: "site, 40 % to 58 %, +18". */
 export const recapLine = (project) => (project.line.startsWith(project.name) ? project.line : `${project.name}, ${project.line}`)
 
 /**
